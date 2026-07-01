@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+artifacts/
+runs/
+remote_results/
+*.log
+*.pid
+*.ext4
+*.outer.log
+dashboard*.log
+dashboard*.pid
