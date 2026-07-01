@@ -13,7 +13,7 @@
         <div class="brand-mark">AAB</div>
         <div>
           <h1>Agentic Benchmark</h1>
-          <p>Firecracker sweep console</p>
+          <p>Mini SWE Agent dashboard</p>
         </div>
       </div>
 
@@ -27,37 +27,47 @@
         <div class="panel-title">Start Sweep</div>
         <div class="split-fields">
           <label>Workload<select id="workloadSelect" class="control"></select></label>
-          <label>Executor<select id="executorSelect" class="control"></select></label>
+          <label>Runtime<select id="runtimeSelect" class="control"></select></label>
         </div>
         <label>Agents</label>
         <input id="agentsInput" class="control" value="1 2 4 8 16 32 64 128">
         <div class="split-fields">
-          <label>Run seconds<input id="runSecondsInput" class="control" type="number" value="180" min="1"></label>
-          <label>Grace<input id="graceInput" class="control" type="number" value="60" min="0"></label>
+          <label>Context tokens<input id="contextLengthInput" class="control" type="number" value="4096" min="1024"></label>
+          <label>Parallelism<input id="parallelismInput" class="control" type="number" value="4" min="1"></label>
         </div>
         <div class="split-fields">
-          <label>Mem workers<input id="memWorkersInput" class="control" type="number" value="8" min="1"></label>
-          <label>Mem MiB<input id="memMbInput" class="control" type="number" value="256" min="1"></label>
-        </div>
-        <div class="split-fields">
-          <label>vCPU/agent<input id="vcpuInput" class="control" type="number" value="8" min="1"></label>
+          <label>Adapter<select id="adapterModeSelect" class="control">
+            <option value="mock">mock</option>
+            <option value="cli">cli</option>
+          </select></label>
           <label>Name<input id="runNameInput" class="control" value="manual"></label>
         </div>
         <div class="split-fields">
-          <label>Context KiB<input id="llmContextKbInput" class="control" type="number" value="2" min="0"></label>
-          <label>Prompt repeat<input id="llmPromptRepeatInput" class="control" type="number" value="1" min="1"></label>
+          <label>Model<input id="modelInput" class="control" value="agentic-model"></label>
+          <label>Mini command<input id="miniCommandInput" class="control" value="mini"></label>
         </div>
+        <label>vLLM base URL</label>
+        <input id="vllmBaseUrlInput" class="control" value="http://127.0.0.1:8000/v1">
         <div class="split-fields">
-          <label>Max tokens<input id="llmMaxTokensInput" class="control" type="number" value="512" min="1"></label>
-          <label>Request timeout<input id="llmRequestTimeoutInput" class="control" type="number" value="120" min="1"></label>
-        </div>
-        <div class="split-fields">
-          <label>Load mode<select id="llmLoadModeSelect" class="control">
-            <option value="single_task">single_task</option>
-            <option value="sustained_prefill">sustained_prefill</option>
+          <label>Task source<select id="taskSourceSelect" class="control">
+            <option value="synthetic">synthetic</option>
+            <option value="local">local</option>
           </select></label>
-          <label>Inter-task sleep<input id="llmInterTaskSleepInput" class="control" type="number" value="0" min="0"></label>
+          <label>Workspace<select id="workspaceModeSelect" class="control">
+            <option value="worktree">worktree</option>
+            <option value="copy">copy</option>
+            <option value="source">source</option>
+          </select></label>
         </div>
+        <label>Repo source</label>
+        <input id="repoSourceInput" class="control" placeholder="/home/user/repos/django">
+        <label>Task</label>
+        <input id="taskInput" class="control" placeholder="Inspect the repo and fix a focused issue">
+        <label>Verify command</label>
+        <input id="verifyCommandInput" class="control" placeholder="python -m pytest tests/path">
+        <label class="check-row"><input id="repoContextEnabledInput" type="checkbox"> Repo context</label>
+        <label class="check-row"><input id="gitHistoryInput" type="checkbox"> Git history scan</label>
+        <label class="check-row"><input id="pytestCollectInput" type="checkbox"> Pytest collection</label>
         <label>Password</label>
         <input id="sudoInput" class="control" type="password" placeholder="Uses server env if empty">
         <div class="actions">

@@ -133,6 +133,12 @@ label {
   margin: 8px 0 4px;
 }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .control {
   width: 100%;
   min-height: 34px;

@@ -23,7 +23,11 @@ AAB_REPO_CONTEXT_GIT_LOG_LIMIT="${AAB_REPO_CONTEXT_GIT_LOG_LIMIT:-1000}"
 AAB_REPO_CONTEXT_PYTEST_COLLECT="${AAB_REPO_CONTEXT_PYTEST_COLLECT:-0}"
 AAB_REPO_CONTEXT_PYTEST_COMMAND="${AAB_REPO_CONTEXT_PYTEST_COMMAND:-python -m pytest --collect-only -q}"
 AAB_REPO_CONTEXT_PYTEST_TIMEOUT_SEC="${AAB_REPO_CONTEXT_PYTEST_TIMEOUT_SEC:-120}"
-MINI_COMMAND="${MINI_COMMAND:-/home/ubuntu/aab-mini-swe-test-20260629-192309/.venv/bin/mini}"
+TASK_SOURCE="${TASK_SOURCE:-synthetic}"
+TASK="${TASK:-}"
+VERIFY_COMMAND="${VERIFY_COMMAND:-}"
+VERIFY_TIMEOUT_SEC="${VERIFY_TIMEOUT_SEC:-120}"
+MINI_COMMAND="${MINI_COMMAND:-mini}"
 MODEL="${MODEL:-openai/agentic-model}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
 PCM_BIN="${PCM_BIN:-/home/user/zhi/AMDuProf_Nda_Linux_x64_5.0.1479/bin/AMDuProfPcm}"
@@ -35,6 +39,28 @@ SUDO_PASSWORD="${SUDO_PASSWORD:-}"
 mkdir -p "${SWEEP_ROOT}"
 
 repo_context_args=()
+task_args=(
+  --task-source "${TASK_SOURCE}"
+  --verify-timeout-sec "${VERIFY_TIMEOUT_SEC}"
+)
+if [[ -n "${TASK}" ]]; then
+  task_args+=(--task "${TASK}")
+fi
+if [[ -n "${VERIFY_COMMAND}" ]]; then
+  task_args+=(--verify-command "${VERIFY_COMMAND}")
+fi
+if [[ "${TASK_SOURCE}" == "local" ]]; then
+  if [[ -z "${AAB_REPO_SOURCE}" ]]; then
+    echo "AAB_REPO_SOURCE is required when TASK_SOURCE=local" >&2
+    exit 2
+  fi
+  if [[ -z "${TASK}" ]]; then
+    echo "TASK is required when TASK_SOURCE=local" >&2
+    exit 2
+  fi
+  task_args+=(--repo-source "${AAB_REPO_SOURCE}")
+fi
+
 if [[ "${AAB_REPO_CONTEXT_ENABLED}" == "1" ]]; then
   if [[ -z "${AAB_REPO_SOURCE}" ]]; then
     echo "AAB_REPO_SOURCE is required when AAB_REPO_CONTEXT_ENABLED=1" >&2
@@ -192,6 +218,7 @@ for agents in ${AGENT_SWEEP//,/ }; do
       --mini-command "${MINI_COMMAND}" \
       --model "${MODEL}" \
       --vllm-base-url "${VLLM_BASE_URL}" \
+      "${task_args[@]}" \
       "${repo_context_args[@]}" \
       --out-dir "${SWEEP_ROOT}" 2>&1
   )"

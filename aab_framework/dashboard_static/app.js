@@ -29,7 +29,10 @@ async function refreshPlugins() {
   const data = await requestJson("/api/plugins");
   state.plugins = data;
   fillPluginSelect("workloadSelect", data.workloads || []);
-  fillPluginSelect("executorSelect", data.executors || []);
+  fillPluginSelect("runtimeSelect", data.runtimes || []);
+  if ([...$("workloadSelect").options].some((item) => item.value === "mini_swe_agent_team_v2")) {
+    $("workloadSelect").value = "mini_swe_agent_team_v2";
+  }
 }
 
 function fillPluginSelect(selectId, items) {
@@ -559,20 +562,23 @@ async function startSweep() {
   try {
     const payload = {
       agents: $("agentsInput").value,
-      run_seconds: Number($("runSecondsInput").value),
-      workload_grace_seconds: Number($("graceInput").value),
-      memory_workers: Number($("memWorkersInput").value),
-      memory_mb: Number($("memMbInput").value),
-      vcpus_per_agent: Number($("vcpuInput").value),
-      llm_context_kb: Number($("llmContextKbInput").value),
-      llm_prompt_repeat: Number($("llmPromptRepeatInput").value),
-      llm_max_tokens: Number($("llmMaxTokensInput").value),
-      llm_load_mode: $("llmLoadModeSelect").value,
-      llm_request_timeout_seconds: Number($("llmRequestTimeoutInput").value),
-      llm_inter_task_sleep_ms: Number($("llmInterTaskSleepInput").value),
+      context_length: Number($("contextLengthInput").value),
+      parallelism: Number($("parallelismInput").value),
+      adapter_mode: $("adapterModeSelect").value,
+      runtime_type: $("runtimeSelect").value,
+      model: $("modelInput").value,
+      vllm_base_url: $("vllmBaseUrlInput").value,
+      mini_command: $("miniCommandInput").value,
+      task_source: $("taskSourceSelect").value,
+      task: $("taskInput").value,
+      verify_command: $("verifyCommandInput").value,
+      repo_context_enabled: $("repoContextEnabledInput").checked,
+      repo_source: $("repoSourceInput").value,
+      repo_workspace_mode: $("workspaceModeSelect").value,
+      repo_context_include_git_history: $("gitHistoryInput").checked,
+      repo_context_pytest_collect: $("pytestCollectInput").checked,
       run_name: $("runNameInput").value,
       workload: $("workloadSelect").value,
-      executor: $("executorSelect").value,
       sudo_password: $("sudoInput").value,
     };
     const data = await requestJson("/api/sweep", {

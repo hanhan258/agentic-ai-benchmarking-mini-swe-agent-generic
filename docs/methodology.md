@@ -41,9 +41,7 @@ PCIe GPU Server
         └── task verification
 ```
 
-The LLM service should run on the host, often in Docker, with direct access to the GPUs. Agent execution should run in an isolated environment, such as a process, container, or microVM.
-
-MicroVMs, such as Firecracker, are an implementation option for stronger isolation. They are not the methodology itself.
+The LLM service should run on the host, often in Docker, with direct access to the GPUs. In this repository, agent execution is supported through host processes and Docker containers.
 
 ## 3. Core Abstractions
 
@@ -62,11 +60,10 @@ Metrics Collector
 
 The executor defines where and how agents run.
 
-Supported executor types may include:
+Supported runtime types in this repository:
 
 - process executor
 - Docker executor
-- microVM executor
 
 The same workload should be runnable across different executors to compare isolation overhead, resource efficiency, and failure boundaries.
 
@@ -384,4 +381,3 @@ isolation metrics
 ```
 
 It is suitable for coding workloads and generalizes to other agentic AI scenarios. The central idea is to evaluate the full agent platform, not only the model or token throughput.
-

@@ -78,7 +78,7 @@ ALIGNED_FIELDS = [
 ]
 
 
-def summarize_firecracker_sweep(
+def summarize_agent_sweep(
     run_root: str | Path,
     *,
     run_seconds: float,

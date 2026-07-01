@@ -17,8 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .agent_team import ChallengeAgent, PluginRegistry
-from .executors.firecracker import build_firecracker_executor_spec
-from .metrics import summarize_firecracker_sweep
+from .metrics import summarize_agent_sweep
 from .workloads.coding import build_coding_workload_spec
 from .workloads.mini_swe_agent_team_v2 import build_mini_swe_agent_team_v2_workload_spec
 from .team_v2.sweep import SWEEP_WORKLOAD_TYPE
@@ -26,30 +25,32 @@ from .team_v2.sweep import SWEEP_WORKLOAD_TYPE
 
 MAX_AGENT_COUNT = 512
 STATIC_DIR = Path(__file__).with_name("dashboard_static")
-SUPPORTED_DASHBOARD_COMBO = ("coding", "firecracker")
 TEAM_V2_WORKLOAD = "mini_swe_agent_team_v2"
+SUPPORTED_RUNTIMES = ("process", "docker")
 VLLM_MODELS_URL = "http://127.0.0.1:8000/v1/models"
 
 
 @dataclass(frozen=True)
 class SweepLaunchConfig:
     agents: list[int]
-    run_seconds: int = 180
-    workload_grace_seconds: int = 60
-    memory_workers: int = 8
-    memory_mb: int = 256
-    memory_rounds: int = 16
-    vcpus_per_agent: int = 8
-    llm_context_kb: int = 2
-    llm_prompt_repeat: int = 1
-    llm_max_tokens: int = 512
-    llm_load_mode: str = "single_task"
-    llm_request_timeout_seconds: int = 120
-    llm_inter_task_sleep_ms: int = 0
+    context_length: int = 4096
+    parallelism: int = 4
+    adapter_mode: str = "mock"
+    runtime_type: str = "process"
+    model: str = "agentic-model"
+    vllm_base_url: str = "http://127.0.0.1:8000/v1"
+    mini_command: str = "mini"
+    task_source: str = "synthetic"
+    task: str = ""
+    verify_command: str = ""
+    repo_context_enabled: bool = False
+    repo_source: str = ""
+    repo_workspace_mode: str = "worktree"
+    repo_context_include_git_history: bool = False
+    repo_context_pytest_collect: bool = False
     sudo_password: str = ""
     run_name: str = "manual"
-    workload: str = "coding"
-    executor: str = "firecracker"
+    workload: str = TEAM_V2_WORKLOAD
 
 
 def parse_agents_list(value: str) -> list[int]:
@@ -76,44 +77,46 @@ def parse_agents_list(value: str) -> list[int]:
 
 
 def build_sweep_environment(config: SweepLaunchConfig, *, timestamp: str | None = None) -> dict[str, str]:
-    _validate_dashboard_combo(config.workload, config.executor)
+    _validate_dashboard_combo(config.workload, config.runtime_type)
     label = _sanitize_label(config.run_name)
     stamp = timestamp or time.strftime("%Y%m%d-%H%M%S")
-    return {
-        "AGENTS_LIST": " ".join(str(item) for item in config.agents),
-        "RUN_SECONDS": str(_positive_int(config.run_seconds, "run_seconds")),
-        "WORKLOAD_GRACE_SECONDS": str(
-            _non_negative_int(config.workload_grace_seconds, "workload_grace_seconds")
+    env = {
+        "AGENT_SWEEP": " ".join(str(item) for item in config.agents),
+        "CONTEXT_LENGTH": str(_positive_int(config.context_length, "context_length")),
+        "PARALLELISM": str(_positive_int(config.parallelism, "parallelism")),
+        "ADAPTER_MODE": _validate_choice(config.adapter_mode, {"mock", "cli"}, "adapter_mode"),
+        "RUNTIME_TYPE": _validate_choice(config.runtime_type, set(SUPPORTED_RUNTIMES), "runtime_type"),
+        "MODEL": config.model.strip() or "agentic-model",
+        "VLLM_BASE_URL": config.vllm_base_url.strip() or "http://127.0.0.1:8000/v1",
+        "MINI_COMMAND": config.mini_command.strip() or "mini",
+        "TASK_SOURCE": _validate_choice(config.task_source, {"synthetic", "local"}, "task_source"),
+        "TASK": config.task,
+        "VERIFY_COMMAND": config.verify_command,
+        "AAB_REPO_CONTEXT_ENABLED": "1" if config.repo_context_enabled else "0",
+        "AAB_REPO_SOURCE": config.repo_source,
+        "AAB_REPO_WORKSPACE_MODE": _validate_choice(
+            config.repo_workspace_mode,
+            {"source", "copy", "worktree"},
+            "repo_workspace_mode",
         ),
-        "AAB_MEMORY_WORKERS": str(_positive_int(config.memory_workers, "memory_workers")),
-        "AAB_MEMORY_MB": str(_positive_int(config.memory_mb, "memory_mb")),
-        "AAB_MEMORY_ROUNDS": str(_positive_int(config.memory_rounds, "memory_rounds")),
-        "AAB_VCPUS_PER_AGENT": str(_positive_int(config.vcpus_per_agent, "vcpus_per_agent")),
-        "AAB_LLM_CONTEXT_KB": str(_non_negative_int(config.llm_context_kb, "llm_context_kb")),
-        "AAB_LLM_PROMPT_REPEAT": str(_positive_int(config.llm_prompt_repeat, "llm_prompt_repeat")),
-        "AAB_LLM_MAX_TOKENS": str(_positive_int(config.llm_max_tokens, "llm_max_tokens")),
-        "AAB_LLM_LOAD_MODE": _validate_llm_load_mode(config.llm_load_mode),
-        "AAB_LLM_REQUEST_TIMEOUT_SECONDS": str(
-            _positive_int(config.llm_request_timeout_seconds, "llm_request_timeout_seconds")
-        ),
-        "AAB_LLM_INTER_TASK_SLEEP_MS": str(
-            _non_negative_int(config.llm_inter_task_sleep_ms, "llm_inter_task_sleep_ms")
-        ),
-        "AAB_WORKLOAD": config.workload,
-        "AAB_EXECUTOR": config.executor,
+        "AAB_REPO_CONTEXT_INCLUDE_GIT_HISTORY": "1" if config.repo_context_include_git_history else "0",
+        "AAB_REPO_CONTEXT_PYTEST_COLLECT": "1" if config.repo_context_pytest_collect else "0",
         "SUDO_PASSWORD": config.sudo_password,
         "SWEEP_ROOT": f"runs/dashboard-{label}-{stamp}",
     }
+    if config.task_source == "local" and not config.repo_source:
+        raise ValueError("repo_source is required for local tasks")
+    if config.repo_context_enabled and not config.repo_source:
+        raise ValueError("repo_source is required when repo context is enabled")
+    return env
 
 
 def dashboard_plugins_payload() -> dict[str, Any]:
     registry = PluginRegistry()
     workload = build_coding_workload_spec()
     team_workload = build_mini_swe_agent_team_v2_workload_spec()
-    executor = build_firecracker_executor_spec()
     registry.register_workload(workload)
     registry.register_workload(team_workload)
-    registry.register_executor(executor)
     challenge = ChallengeAgent()
     return {
         "workloads": [
@@ -126,25 +129,16 @@ def dashboard_plugins_payload() -> dict[str, Any]:
             }
             for item in (registry.workload(name) for name in registry.workload_names())
         ],
-        "executors": [
-            {
-                "name": item.name,
-                "isolation": item.isolation,
-                "supports_cpu_pinning": item.supports_cpu_pinning,
-                "supports_numa_binding": item.supports_numa_binding,
-            }
-            for item in (registry.executor(name) for name in registry.executor_names())
-        ],
+        "runtimes": [{"name": item} for item in SUPPORTED_RUNTIMES],
         "supported_combinations": [
-            {"workload": SUPPORTED_DASHBOARD_COMBO[0], "executor": SUPPORTED_DASHBOARD_COMBO[1]},
-            {"workload": TEAM_V2_WORKLOAD, "executor": "process"},
+            {"workload": TEAM_V2_WORKLOAD, "runtime": runtime}
+            for runtime in SUPPORTED_RUNTIMES
         ],
         "challenge_reviews": {
             "workloads": {
                 workload.name: _review_to_dict(challenge.review_workload(workload)),
                 team_workload.name: _review_to_dict(challenge.review_workload(team_workload)),
             },
-            "executors": {executor.name: _review_to_dict(challenge.review_executor(executor))},
         },
     }
 
@@ -214,7 +208,7 @@ def ensure_aligned_metrics(run_dir: str | Path) -> bool:
     run_seconds = float(metadata.get("run_seconds") or 180)
     grace_seconds = float(metadata.get("workload_grace_seconds") or 60)
     workload_seconds = max(run_seconds - grace_seconds, 1)
-    summarize_firecracker_sweep(
+    summarize_agent_sweep(
         run_path,
         run_seconds=run_seconds,
         workload_seconds=workload_seconds,
@@ -315,7 +309,7 @@ class DashboardState:
             stdout_log = sweep_root / "dashboard-sweep.log"
             env = os.environ.copy()
             env.update(env_updates)
-            script = self.project_root / "bin" / "run_coding_firecracker_sweep.sh"
+            script = self.project_root / "bin" / "run_mini_swe_agent_team_v2_sweep_with_metrics.sh"
             handle = stdout_log.open("w", encoding="utf-8")
             process = subprocess.Popen(
                 ["bash", str(script)],
@@ -391,25 +385,27 @@ def _make_handler(state: DashboardState) -> type[BaseHTTPRequestHandler]:
                     payload = self._read_json_body()
                     config = SweepLaunchConfig(
                         agents=parse_agents_list(str(payload.get("agents", ""))),
-                        run_seconds=int(payload.get("run_seconds", 180)),
-                        workload_grace_seconds=int(payload.get("workload_grace_seconds", 60)),
-                        memory_workers=int(payload.get("memory_workers", 8)),
-                        memory_mb=int(payload.get("memory_mb", 256)),
-                        memory_rounds=int(payload.get("memory_rounds", 16)),
-                        vcpus_per_agent=int(payload.get("vcpus_per_agent", 8)),
-                        llm_context_kb=int(payload.get("llm_context_kb", 2)),
-                        llm_prompt_repeat=int(payload.get("llm_prompt_repeat", 1)),
-                        llm_max_tokens=int(payload.get("llm_max_tokens", 512)),
-                        llm_load_mode=str(payload.get("llm_load_mode") or "single_task"),
-                        llm_request_timeout_seconds=int(payload.get("llm_request_timeout_seconds", 120)),
-                        llm_inter_task_sleep_ms=int(payload.get("llm_inter_task_sleep_ms", 0)),
+                        context_length=int(payload.get("context_length", 4096)),
+                        parallelism=int(payload.get("parallelism", 4)),
+                        adapter_mode=str(payload.get("adapter_mode") or "mock"),
+                        runtime_type=str(payload.get("runtime_type") or "process"),
+                        model=str(payload.get("model") or "agentic-model"),
+                        vllm_base_url=str(payload.get("vllm_base_url") or "http://127.0.0.1:8000/v1"),
+                        mini_command=str(payload.get("mini_command") or "mini"),
+                        task_source=str(payload.get("task_source") or "synthetic"),
+                        task=str(payload.get("task") or ""),
+                        verify_command=str(payload.get("verify_command") or ""),
+                        repo_context_enabled=bool(payload.get("repo_context_enabled")),
+                        repo_source=str(payload.get("repo_source") or ""),
+                        repo_workspace_mode=str(payload.get("repo_workspace_mode") or "worktree"),
+                        repo_context_include_git_history=bool(payload.get("repo_context_include_git_history")),
+                        repo_context_pytest_collect=bool(payload.get("repo_context_pytest_collect")),
                         sudo_password=str(
                             payload.get("sudo_password")
                             or os.environ.get("AAB_DASHBOARD_SUDO_PASSWORD", "")
                         ),
                         run_name=str(payload.get("run_name") or payload.get("run_label") or "manual"),
-                        workload=str(payload.get("workload") or "coding"),
-                        executor=str(payload.get("executor") or "firecracker"),
+                        workload=str(payload.get("workload") or TEAM_V2_WORKLOAD),
                     )
                     self._send_json({"status": state.start_sweep(config)}, status=HTTPStatus.ACCEPTED)
                 elif parsed.path == "/api/sweep/stop":
@@ -456,13 +452,6 @@ def _resolve_run(state: DashboardState, name: str) -> Path:
         runs = list_runs(state.runs_dir)
         if runs:
             return Path(runs[0]["path"])
-        latest_file = state.runs_dir / "latest_coding_firecracker_sweep_dir.txt"
-        if latest_file.exists():
-            value = latest_file.read_text(encoding="utf-8").strip()
-            if value:
-                path = state.project_root / value
-                if path.exists():
-                    return path
         raise ValueError("no runs found")
     safe_name = Path(name).name
     path = state.runs_dir / safe_name
@@ -534,7 +523,7 @@ def _build_point(run_path: Path, row: dict[str, str]) -> dict[str, Any]:
     agents = int(float(row.get("agents", "0") or 0))
     point_path = run_path / f"agents_{agents}"
     result_summary = _read_json(point_path / "results" / "summary.json")
-    manifest = _read_json(point_path / "firecracker-run.json")
+    manifest = _read_json(point_path / "run_manifest.json")
     failed_vm_ids = [
         item.get("vm_id", "")
         for item in result_summary.get("results", [])
@@ -873,20 +862,22 @@ def _write_run_metadata(run_path: Path, config: SweepLaunchConfig, env_updates: 
         "created_at_unix": time.time(),
         "sweep_root": env_updates["SWEEP_ROOT"],
         "agents": config.agents,
-        "run_seconds": config.run_seconds,
-        "workload_grace_seconds": config.workload_grace_seconds,
-        "memory_workers": config.memory_workers,
-        "memory_mb": config.memory_mb,
-        "memory_rounds": config.memory_rounds,
-        "vcpus_per_agent": config.vcpus_per_agent,
-        "llm_context_kb": config.llm_context_kb,
-        "llm_prompt_repeat": config.llm_prompt_repeat,
-        "llm_max_tokens": config.llm_max_tokens,
-        "llm_load_mode": config.llm_load_mode,
-        "llm_request_timeout_seconds": config.llm_request_timeout_seconds,
-        "llm_inter_task_sleep_ms": config.llm_inter_task_sleep_ms,
+        "context_length": config.context_length,
+        "parallelism": config.parallelism,
+        "adapter_mode": config.adapter_mode,
+        "runtime_type": config.runtime_type,
+        "model": config.model,
+        "vllm_base_url": config.vllm_base_url,
+        "mini_command": config.mini_command,
+        "task_source": config.task_source,
+        "task": config.task,
+        "verify_command": config.verify_command,
+        "repo_context_enabled": config.repo_context_enabled,
+        "repo_source": config.repo_source,
+        "repo_workspace_mode": config.repo_workspace_mode,
+        "repo_context_include_git_history": config.repo_context_include_git_history,
+        "repo_context_pytest_collect": config.repo_context_pytest_collect,
         "workload": config.workload,
-        "executor": config.executor,
     }
     (run_path / "dashboard-run.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -947,10 +938,10 @@ def _sanitize_label(value: str) -> str:
     return label or "manual"
 
 
-def _validate_dashboard_combo(workload: str, executor: str) -> None:
-    if (workload, executor) != SUPPORTED_DASHBOARD_COMBO:
+def _validate_dashboard_combo(workload: str, runtime_type: str) -> None:
+    if workload != TEAM_V2_WORKLOAD or runtime_type not in SUPPORTED_RUNTIMES:
         raise ValueError(
-            f"unsupported dashboard sweep combination: workload={workload}, executor={executor}"
+            f"unsupported dashboard sweep combination: workload={workload}, runtime_type={runtime_type}"
         )
 
 
@@ -969,15 +960,9 @@ def _positive_int(value: int, name: str) -> int:
     return value
 
 
-def _non_negative_int(value: int, name: str) -> int:
-    if value < 0:
-        raise ValueError(f"{name} must be non-negative")
-    return value
-
-
-def _validate_llm_load_mode(value: str) -> str:
-    if value not in {"single_task", "sustained_prefill"}:
-        raise ValueError(f"unsupported llm_load_mode: {value}")
+def _validate_choice(value: str, choices: set[str], name: str) -> str:
+    if value not in choices:
+        raise ValueError(f"unsupported {name}: {value}")
     return value
 
 

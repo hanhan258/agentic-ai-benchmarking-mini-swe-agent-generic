@@ -1,0 +1,17 @@
+services:
+  dashboard:
+    build:
+      context: .
+    image: agentic-ai-benchmarking-mini-swe-agent:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./runs:/app/runs
+    environment:
+      AAB_UI_HOST: 0.0.0.0
+      AAB_UI_PORT: "8080"
+      AAB_UI_FALLBACK_PORT: "8080"
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      MODEL: ${MODEL:-agentic-model}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -104,15 +104,6 @@ class TeamRunConfig:
     ui_fallback_port: int = 8080
     ui_enable_port_fallback: bool = True
     instances_file: str | None = None
-    use_firecracker: bool = False
-    fc_rootfs: str | None = None
-    fc_kernel: str | None = None
-    fc_runner: str = "bin/run_prepared_firecracker_agents.sh"
-    guest_vllm_base_url: str = "http://172.16.0.1:8000/v1"
-    firecracker_run_seconds: int = 120
-    firecracker_vcpu_count: int = 2
-    firecracker_mem_mib: int = 4096
-    firecracker_dry_run: bool = False
 
     def __post_init__(self) -> None:
         if self.num_agents < 1:
@@ -125,8 +116,8 @@ class TeamRunConfig:
             raise ValueError("candidate_per_issue must be positive")
         if self.context_length not in SUPPORTED_CONTEXT_LENGTHS:
             raise ValueError(f"context_length must be one of {SUPPORTED_CONTEXT_LENGTHS}")
-        if self.runtime_type not in {"docker", "firecracker", "process"}:
-            raise ValueError("runtime_type must be docker, firecracker, or process")
+        if self.runtime_type not in {"docker", "process"}:
+            raise ValueError("runtime_type must be docker or process")
         if self.repo_context_enabled and not self.repo_source:
             raise ValueError("repo_source is required when repo_context_enabled is true")
         if self.task_source == "local" and not self.repo_source:
@@ -157,8 +148,6 @@ class TeamRunConfig:
             raise ValueError("repeats must be positive")
         if self.fixed_llm_requests < 1:
             raise ValueError("fixed_llm_requests must be positive")
-        if self.use_firecracker and (not self.fc_rootfs or not self.fc_kernel):
-            raise ValueError("fc_rootfs and fc_kernel are required when use_firecracker is true")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

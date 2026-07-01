@@ -32,7 +32,7 @@ class MetricsObserver:
         window = {
             "started_at": _iso(self.started_at or self.ended_at or time.time()),
             "ended_at": _iso(self.ended_at or time.time()),
-            "source": "run_prepared_firecracker_agents.sh" if (self.run_dir / "firecracker-run.json").exists() else "existing_metrics_pipeline",
+            "source": "existing_metrics_pipeline",
             "attribution_method": "run_time_window",
         }
         legacy.setdefault("attribution_method", "time_window")

@@ -12,7 +12,6 @@ from aab_framework.cli import main
 from aab_framework.dashboard import load_run_report, serve_with_fallback
 from aab_framework.team_v2 import DEFAULT_CONTEXT_LENGTH, SUPPORTED_CONTEXT_LENGTHS, TeamOrchestrator, TeamRunConfig
 from aab_framework.team_v2.docker_runtime import DockerRuntime
-from aab_framework.team_v2.firecracker_runner import prepare_firecracker_team_plan
 from aab_framework.team_v2.metrics_wrapper import build_sweep_from_child_runs, refresh_run_metrics
 from aab_framework.team_v2.planner import TaskPlanner
 from aab_framework.team_v2.repo_context import RepoContextBuilder, RepoWorkspaceManager
@@ -685,38 +684,6 @@ class MiniSweAgentTeamV2Tests(unittest.TestCase):
 
         self.assertEqual([item["num_agents"] for item in sweep["scaling_metrics"]], [1, 2])
         self.assertEqual([item["cpu_avg"] for item in sweep_file["scaling_metrics"]], [12.0, 34.0])
-
-    def test_firecracker_team_plan_writes_vm_task_specs(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            kernel = root / "vmlinux"
-            rootfs = root / "rootfs.ext4"
-            kernel.write_text("kernel", encoding="utf-8")
-            rootfs.write_text("rootfs", encoding="utf-8")
-            config = TeamRunConfig(
-                num_agents=2,
-                parallelism=2,
-                use_firecracker=True,
-                fc_kernel=str(kernel),
-                fc_rootfs=str(rootfs),
-                guest_vllm_base_url="http://172.16.0.1:8000/v1",
-                out_dir=str(root),
-            )
-            workers = TaskPlanner().build_workers(config)
-            plans = TaskPlanner().build_issue_plans(config, workers)
-
-            manifest = prepare_firecracker_team_plan(config, "run-1", root / "run-1", workers, plans)
-
-            task_specs = sorted((root / "run-1" / "tasks").glob("*/task.json"))
-            self.assertEqual(len(task_specs), 2)
-            first = json.loads(task_specs[0].read_text(encoding="utf-8"))
-            self.assertEqual(first["context_length"], DEFAULT_CONTEXT_LENGTH)
-            self.assertEqual(first["vllm_base_url"], "http://172.16.0.1:8000/v1")
-            self.assertEqual(first["output_dir"], "/output")
-            self.assertEqual(manifest["runner"], "bin/run_prepared_firecracker_agents.sh")
-            self.assertTrue(all("task_spec_host_path" in agent for agent in manifest["agents"]))
-            self.assertTrue(all(agent["socket_path"].startswith("/tmp/aab-") for agent in manifest["agents"]))
-            self.assertTrue(all(len(agent["socket_path"]) < 100 for agent in manifest["agents"]))
 
     def test_ui_port_fallback_path_does_not_crash(self) -> None:
         calls = []

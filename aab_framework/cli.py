@@ -2,21 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from .agent_team import ChallengeAgent, PluginRegistry
-from .executors.firecracker import build_firecracker_executor_spec
-from .firecracker import (
-    FirecrackerPaths,
-    build_firecracker_command,
-    discover_firecracker,
-    plan_agents,
-    spec_to_dict,
-    write_vm_config,
-)
-from .firecracker_sweep import prepare_firecracker_run
-from .guest_agent import run_noop_agent
-from .metrics import summarize_firecracker_sweep
 from .team_v2 import DEFAULT_CONTEXT_LENGTH, TeamRunConfig
 from .team_v2.sweep import TeamSweepOrchestrator
 from .workloads.coding import build_coding_workload_spec
@@ -50,70 +37,6 @@ def main(argv: list[str] | None = None) -> int:
     vllm_parser.add_argument("--max-num-batched-tokens", type=int, default=None)
     vllm_parser.add_argument("--enable-auto-tool-choice", action="store_true")
     vllm_parser.add_argument("--tool-call-parser", default=None)
-
-    plan_parser = subparsers.add_parser("plan-firecracker-agents")
-    plan_parser.add_argument("--vm-count", type=int, default=1)
-    plan_parser.add_argument("--base-id", default="agent")
-    plan_parser.add_argument("--host-vllm-url", default="http://172.16.0.1:8000/v1")
-    plan_parser.add_argument("--guest-ip-prefix", default="172.16.0")
-    plan_parser.add_argument("--host-ip", default="172.16.0.1")
-    plan_parser.add_argument("--guest-netmask", default="255.255.0.0")
-    plan_parser.add_argument("--kernel-image", required=True)
-    plan_parser.add_argument("--rootfs-image", required=True)
-    plan_parser.add_argument("--out-dir", required=True)
-    plan_parser.add_argument("--vcpu-count", type=int, default=2)
-    plan_parser.add_argument("--mem-mib", type=int, default=1024)
-    plan_parser.add_argument("--tasks-per-vm", type=int, default=1)
-    plan_parser.add_argument("--request-workers", type=int, default=1)
-    plan_parser.add_argument("--workload-seconds", type=int, default=60)
-    plan_parser.add_argument("--memory-workers", type=int, default=4)
-    plan_parser.add_argument("--memory-mb", type=int, default=512)
-    plan_parser.add_argument("--memory-rounds", type=int, default=16)
-    plan_parser.add_argument("--memory-mode", default="read")
-    plan_parser.add_argument("--llm-context-kb", type=int, default=0)
-    plan_parser.add_argument("--llm-prompt-repeat", type=int, default=1)
-    plan_parser.add_argument("--llm-max-tokens", type=int, default=512)
-    plan_parser.add_argument("--llm-load-mode", default="single_task")
-    plan_parser.add_argument("--llm-request-timeout-seconds", type=int, default=120)
-    plan_parser.add_argument("--llm-inter-task-sleep-ms", type=int, default=0)
-
-    preflight_parser = subparsers.add_parser("firecracker-preflight")
-    preflight_parser.add_argument("--firecracker-bin", default=None)
-    preflight_parser.add_argument("--kernel-image", required=True)
-    preflight_parser.add_argument("--rootfs-image", required=True)
-
-    guest_parser = subparsers.add_parser("guest-noop")
-    guest_parser.add_argument("--vm-id", required=True)
-    guest_parser.add_argument("--host-vllm-url", required=True)
-    guest_parser.add_argument("--output", required=True)
-
-    prepare_parser = subparsers.add_parser("prepare-firecracker-run")
-    prepare_parser.add_argument("--out-dir", required=True)
-    prepare_parser.add_argument("--vm-count", type=int, required=True)
-    prepare_parser.add_argument("--kernel-image", required=True)
-    prepare_parser.add_argument("--base-rootfs-image", required=True)
-    prepare_parser.add_argument("--host-vllm-url", default="http://172.16.0.1:8000/v1")
-    prepare_parser.add_argument("--guest-netmask", default="255.255.0.0")
-    prepare_parser.add_argument("--tasks-per-vm", type=int, default=1)
-    prepare_parser.add_argument("--request-workers", type=int, default=1)
-    prepare_parser.add_argument("--vcpu-count", type=int, default=2)
-    prepare_parser.add_argument("--mem-mib", type=int, default=1024)
-    prepare_parser.add_argument("--workload-seconds", type=int, default=60)
-    prepare_parser.add_argument("--memory-workers", type=int, default=4)
-    prepare_parser.add_argument("--memory-mb", type=int, default=512)
-    prepare_parser.add_argument("--memory-rounds", type=int, default=16)
-    prepare_parser.add_argument("--memory-mode", default="read")
-    prepare_parser.add_argument("--llm-context-kb", type=int, default=0)
-    prepare_parser.add_argument("--llm-prompt-repeat", type=int, default=1)
-    prepare_parser.add_argument("--llm-max-tokens", type=int, default=512)
-    prepare_parser.add_argument("--llm-load-mode", default="single_task")
-    prepare_parser.add_argument("--llm-request-timeout-seconds", type=int, default=120)
-    prepare_parser.add_argument("--llm-inter-task-sleep-ms", type=int, default=0)
-
-    summarize_parser = subparsers.add_parser("summarize-firecracker-sweep")
-    summarize_parser.add_argument("--run-root", required=True)
-    summarize_parser.add_argument("--run-seconds", type=float, required=True)
-    summarize_parser.add_argument("--workload-seconds", type=float, required=True)
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--workload", required=True)
@@ -149,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--adapter-mode", default="mock", choices=("mock", "cli"))
     run_parser.add_argument("--mini-command", default="mini")
     run_parser.add_argument("--mini-swe-agent-repo", default="third_party/mini-swe-agent")
-    run_parser.add_argument("--runtime-type", default="docker", choices=("docker", "process", "firecracker"))
+    run_parser.add_argument("--runtime-type", default="docker", choices=("docker", "process"))
     run_parser.add_argument("--repo-context-enabled", action="store_true")
     run_parser.add_argument("--repo-source", default=None)
     run_parser.add_argument("--repo-context-max-files", type=int, default=20000)
@@ -169,14 +92,6 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--ui-port", type=int, default=80)
     run_parser.add_argument("--ui-fallback-port", type=int, default=8080)
     run_parser.add_argument("--disable-ui-port-fallback", action="store_true")
-    run_parser.add_argument("--use-firecracker", nargs="?", const=True, default=False, type=_parse_bool)
-    run_parser.add_argument("--fc-rootfs", default=None)
-    run_parser.add_argument("--fc-kernel", default=None)
-    run_parser.add_argument("--fc-runner", default="bin/run_prepared_firecracker_agents.sh")
-    run_parser.add_argument("--guest-vllm-base-url", default="http://172.16.0.1:8000/v1")
-    run_parser.add_argument("--firecracker-run-seconds", type=int, default=120)
-    run_parser.add_argument("--firecracker-vcpu-count", type=int, default=2)
-    run_parser.add_argument("--firecracker-mem-mib", type=int, default=4096)
 
     sweep_parser = subparsers.add_parser("sweep")
     sweep_parser.add_argument("--workload", required=True)
@@ -202,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     sweep_parser.add_argument("--adapter-mode", default="mock", choices=("mock", "cli"))
     sweep_parser.add_argument("--mini-command", default="mini")
     sweep_parser.add_argument("--mini-swe-agent-repo", default="third_party/mini-swe-agent")
-    sweep_parser.add_argument("--runtime-type", default="docker", choices=("docker", "process", "firecracker"))
+    sweep_parser.add_argument("--runtime-type", default="docker", choices=("docker", "process"))
     sweep_parser.add_argument("--repo-context-enabled", action="store_true")
     sweep_parser.add_argument("--repo-source", default=None)
     sweep_parser.add_argument("--repo-context-max-files", type=int, default=20000)
@@ -276,132 +191,6 @@ def main(argv: list[str] | None = None) -> int:
         print(build_vllm_healthcheck_command(port=args.port, api_key=args.api_key))
         return 0
 
-    if args.command == "plan-firecracker-agents":
-        out_dir = Path(args.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        specs = plan_agents(
-            vm_count=args.vm_count,
-            base_id=args.base_id,
-            host_vllm_url=args.host_vllm_url,
-            guest_ip_prefix=args.guest_ip_prefix,
-            host_ip=args.host_ip,
-            guest_netmask=args.guest_netmask,
-            vcpu_count=args.vcpu_count,
-            mem_mib=args.mem_mib,
-            tasks_per_vm=args.tasks_per_vm,
-            request_workers=args.request_workers,
-            workload_seconds=args.workload_seconds,
-            memory_workers=args.memory_workers,
-            memory_mb=args.memory_mb,
-            memory_rounds=args.memory_rounds,
-            memory_mode=args.memory_mode,
-            llm_context_kb=args.llm_context_kb,
-            llm_prompt_repeat=args.llm_prompt_repeat,
-            llm_max_tokens=args.llm_max_tokens,
-            llm_load_mode=args.llm_load_mode,
-            llm_request_timeout_seconds=args.llm_request_timeout_seconds,
-            llm_inter_task_sleep_ms=args.llm_inter_task_sleep_ms,
-        )
-        manifest = []
-        for spec in specs:
-            socket_path = out_dir / f"{spec.vm_id}.socket"
-            config_path = out_dir / f"{spec.vm_id}.json"
-            paths = FirecrackerPaths(
-                kernel_image=args.kernel_image,
-                rootfs_image=args.rootfs_image,
-                socket_path=str(socket_path),
-            )
-            write_vm_config(config_path, spec, paths)
-            item = spec_to_dict(spec)
-            item["config_path"] = str(config_path)
-            item["socket_path"] = str(socket_path)
-            item["firecracker_command"] = build_firecracker_command(
-                "firecracker",
-                str(socket_path),
-                str(config_path),
-            )
-            manifest.append(item)
-        (out_dir / "agents.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        print(json.dumps({"agents": manifest}, indent=2, sort_keys=True))
-        return 0
-
-    if args.command == "firecracker-preflight":
-        print(
-            json.dumps(
-                discover_firecracker(
-                    firecracker_bin=args.firecracker_bin,
-                    kernel_image=args.kernel_image,
-                    rootfs_image=args.rootfs_image,
-                ).to_dict(),
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0
-
-    if args.command == "guest-noop":
-        print(
-            json.dumps(
-                run_noop_agent(
-                    vm_id=args.vm_id,
-                    host_vllm_url=args.host_vllm_url,
-                    output_path=args.output,
-                ),
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0
-
-    if args.command == "prepare-firecracker-run":
-        print(
-            json.dumps(
-                prepare_firecracker_run(
-                    out_dir=args.out_dir,
-                    vm_count=args.vm_count,
-                    kernel_image=args.kernel_image,
-                    base_rootfs_image=args.base_rootfs_image,
-                    host_vllm_url=args.host_vllm_url,
-                    guest_netmask=args.guest_netmask,
-                    tasks_per_vm=args.tasks_per_vm,
-                    request_workers=args.request_workers,
-                    vcpu_count=args.vcpu_count,
-                    mem_mib=args.mem_mib,
-                    workload_seconds=args.workload_seconds,
-                    memory_workers=args.memory_workers,
-                    memory_mb=args.memory_mb,
-                    memory_rounds=args.memory_rounds,
-                    memory_mode=args.memory_mode,
-                    llm_context_kb=args.llm_context_kb,
-                    llm_prompt_repeat=args.llm_prompt_repeat,
-                    llm_max_tokens=args.llm_max_tokens,
-                    llm_load_mode=args.llm_load_mode,
-                    llm_request_timeout_seconds=args.llm_request_timeout_seconds,
-                    llm_inter_task_sleep_ms=args.llm_inter_task_sleep_ms,
-                ),
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0
-
-    if args.command == "summarize-firecracker-sweep":
-        print(
-            json.dumps(
-                summarize_firecracker_sweep(
-                    args.run_root,
-                    run_seconds=args.run_seconds,
-                    workload_seconds=args.workload_seconds,
-                ),
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0
-
     if args.command == "run":
         if args.workload not in {"mini_swe_agent_team_v2", "mini_swe_agent_team"}:
             raise SystemExit(f"unsupported workload for run command: {args.workload}")
@@ -473,27 +262,19 @@ def main(argv: list[str] | None = None) -> int:
         registry = PluginRegistry()
         workload = build_coding_workload_spec()
         mini_workload = build_mini_swe_agent_team_v2_workload_spec()
-        executor = build_firecracker_executor_spec()
         registry.register_workload(workload)
         registry.register_workload(mini_workload)
-        registry.register_executor(executor)
         challenge = ChallengeAgent()
         payload = {
             "workloads": {
                 name: _workload_to_dict(registry.workload(name))
                 for name in registry.workload_names()
             },
-            "executors": {
-                name: _executor_to_dict(registry.executor(name))
-                for name in registry.executor_names()
-            },
+            "runtimes": ["process", "docker"],
             "challenge_reviews": {
                 "workloads": {
                     workload.name: _review_to_dict(challenge.review_workload(workload)),
                     mini_workload.name: _review_to_dict(challenge.review_workload(mini_workload)),
-                },
-                "executors": {
-                    executor.name: _review_to_dict(challenge.review_executor(executor))
                 },
             },
         }
@@ -554,14 +335,6 @@ def _team_run_config_from_args(args, *, context_length: int) -> TeamRunConfig:
         ui_fallback_port=args.ui_fallback_port,
         ui_enable_port_fallback=not args.disable_ui_port_fallback,
         instances_file=args.instances_file,
-        use_firecracker=getattr(args, "use_firecracker", False),
-        fc_rootfs=getattr(args, "fc_rootfs", None),
-        fc_kernel=getattr(args, "fc_kernel", None),
-        fc_runner=getattr(args, "fc_runner", "bin/run_prepared_firecracker_agents.sh"),
-        guest_vllm_base_url=getattr(args, "guest_vllm_base_url", "http://172.16.0.1:8000/v1"),
-        firecracker_run_seconds=getattr(args, "firecracker_run_seconds", 120),
-        firecracker_vcpu_count=getattr(args, "firecracker_vcpu_count", 2),
-        firecracker_mem_mib=getattr(args, "firecracker_mem_mib", 4096),
     )
 
 

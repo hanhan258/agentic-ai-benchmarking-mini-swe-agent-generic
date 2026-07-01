@@ -10,11 +10,6 @@ from typing import Any
 
 from .aggregator import ResultAggregator
 from .docker_runtime import DockerRuntime
-from .firecracker_runner import (
-    collect_firecracker_team_results,
-    prepare_firecracker_team_plan,
-    run_prepared_firecracker_team,
-)
 from .metrics_observer import MetricsObserver
 from .mini_swe_adapter import MiniSweAgentAdapter
 from .planner import TaskPlanner
@@ -52,47 +47,35 @@ class TeamOrchestrator:
                 errors.append("docker runtime is unavailable")
         adapter = MiniSweAgentAdapter(self.config)
 
-        firecracker_manifest: dict[str, Any] | None = None
-        if self.config.use_firecracker:
-            firecracker_manifest = prepare_firecracker_team_plan(self.config, run_id, run_dir, workers, plans)
-            if not self.config.firecracker_dry_run:
-                completed = run_prepared_firecracker_team(self.config, run_dir)
-                (run_dir / "firecracker-run.stdout.log").write_text(completed.stdout, encoding="utf-8")
-                (run_dir / "firecracker-run.stderr.log").write_text(completed.stderr, encoding="utf-8")
-                if completed.returncode != 0:
-                    errors.append(f"firecracker runner exited with {completed.returncode}")
-            issues, firecracker_errors = collect_firecracker_team_results(run_dir, firecracker_manifest, plans)
-            errors.extend(firecracker_errors)
-        else:
-            def run_plan(plan):
-                return SWEWorkerAgent(self.config, adapter).run_issue(plan, run_dir)
+        def run_plan(plan):
+            return SWEWorkerAgent(self.config, adapter).run_issue(plan, run_dir)
 
-            with ThreadPoolExecutor(max_workers=self.config.parallelism) as executor:
-                futures = {executor.submit(run_plan, plan): plan for plan in plans}
-                for future in as_completed(futures):
-                    plan = futures[future]
-                    try:
-                        issues.append(future.result())
-                    except Exception as exc:  # keep result.json even for failed agents
-                        errors.append(f"{plan.issue_id}/{plan.agent_id}: {type(exc).__name__}: {exc}")
-                        now = time.time()
-                        issues.append(
-                            {
-                                "issue_id": plan.issue_id,
-                                "task_id": plan.task_id,
-                                "repo": plan.repo,
-                                "agent_id": plan.agent_id,
-                                "status": "failed",
-                                "started_at": _iso(now),
-                                "ended_at": _iso(now),
-                                "latency_sec": 0,
-                                "rounds": [],
-                                "final_patch_path": "",
-                                "final_test_log_path": "",
-                                "verified": False,
-                                "error": str(exc),
-                            }
-                        )
+        with ThreadPoolExecutor(max_workers=self.config.parallelism) as executor:
+            futures = {executor.submit(run_plan, plan): plan for plan in plans}
+            for future in as_completed(futures):
+                plan = futures[future]
+                try:
+                    issues.append(future.result())
+                except Exception as exc:  # keep result.json even for failed agents
+                    errors.append(f"{plan.issue_id}/{plan.agent_id}: {type(exc).__name__}: {exc}")
+                    now = time.time()
+                    issues.append(
+                        {
+                            "issue_id": plan.issue_id,
+                            "task_id": plan.task_id,
+                            "repo": plan.repo,
+                            "agent_id": plan.agent_id,
+                            "status": "failed",
+                            "started_at": _iso(now),
+                            "ended_at": _iso(now),
+                            "latency_sec": 0,
+                            "rounds": [],
+                            "final_patch_path": "",
+                            "final_test_log_path": "",
+                            "verified": False,
+                            "error": str(exc),
+                        }
+                    )
 
         ended = time.time()
         metrics_summary = metrics.stop()
@@ -140,14 +123,6 @@ class TeamOrchestrator:
             "metrics_field_mapping": metrics_summary.get("metrics_field_mapping", {}),
             "metrics_window": metrics_summary.get("metrics_window", {}),
             "ui": ui,
-            "firecracker": {
-                "enabled": self.config.use_firecracker,
-                "runner": self.config.fc_runner if self.config.use_firecracker else None,
-                "kernel": self.config.fc_kernel,
-                "rootfs": self.config.fc_rootfs,
-                "guest_vllm_base_url": self.config.guest_vllm_base_url,
-                "manifest_path": str(run_dir / "firecracker-run.json") if firecracker_manifest else None,
-            },
             "vllm": {
                 "ok": vllm_ok,
                 "base_url": self.config.vllm_base_url,
