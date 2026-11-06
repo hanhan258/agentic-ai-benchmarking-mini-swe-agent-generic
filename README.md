@@ -1,32 +1,36 @@
-# Agentic AI Benchmarking Mini SWE Agent
+# Agentic AI Benchmarking Mini SWE Agent（通用 Linux CPU/内存版）
 
-This repository packages a deployable benchmark for mini-swe-agent style coding
-agents on PCIe GPU servers. It separates host LLM serving from agent execution
-and records business metrics together with CPU, GPU, and DRAM bandwidth metrics.
+这是一个面向 Agent 集群的基准测试框架，围绕 `mini-SWE-agent` 执行代码任务，并记录任务成功率、吞吐、延迟以及主机 CPU 和内存指标。
 
-## What Runs
+本仓库适合没有本地 GPU、模型服务部署在外部节点的 CPU Agent 服务器或 CPU 机柜。
 
-- vLLM serves an OpenAI-compatible API on the host.
-- Agent workers run through `mini_swe_agent_team_v2`.
-- Workers can run as host processes or Docker containers.
-- Optional repo-context mode scans a real repository before each agent call.
-- The dashboard displays sweep results, CPU metrics, GPU metrics, DRAM bandwidth,
-  agent rows, issue rows, and logs.
+## 主要能力
 
-## Repository Layout
+- 通过 LiteLLM 或其他 OpenAI 兼容接口调用外部大模型；
+- 使用 `mini_swe_agent_team_v2` 运行多个 Agent；
+- 支持宿主机进程和 Docker Worker；
+- 支持真实 Git 仓库上下文扫描；
+- 支持独立 Git worktree，避免多个 Agent 修改同一工作目录；
+- 记录 CPU、主机内存、load、swap 和 Docker 容器指标；
+- 支持标准 SWE-bench 命令的通用主机监控包装。
+
+本版本**不依赖 Intel PCM、DCGM 或本地 GPU**。CPU 和主机内存指标通过 Linux `/proc` 采集；DRAM 带宽如果没有平台专用后端则标记为不可用，不伪造为 0。
+
+## 目录结构
 
 ```text
-aab_framework/
-  cli.py                         command line entry point
-  dashboard.py                   dashboard HTTP server and API
-  metrics.py                     aligned sweep metrics summary
-  team_v2/                       mini-swe-agent team runner
-  dashboard_static/              browser UI
+aab_framework/                         Agent benchmark 主体
+  cli.py                               CLI 入口
+  dashboard.py                         Dashboard 服务
+  team_v2/                             Agent Team v2 编排器
+  dashboard_static/                    Dashboard 前端
 
 bin/
-  start_dashboard.sh
-  start_vllm_8x5090.sh
   run_mini_swe_agent_team_v2_sweep_with_metrics.sh
+  start_dashboard.sh
+
+scripts/
+  generic_host_monitor.py              通用 CPU/内存监控包装器
 
 docs/
   deployment.md
@@ -34,158 +38,141 @@ docs/
   methodology.md
 ```
 
-## Quick Deploy
+## 配置文件方式
+
+Runner 会自动读取项目目录下的 `.env`，显式导出的 Shell 环境变量优先级更高。
 
 ```bash
-cp .env.example .env
-docker compose up --build dashboard
-```
-
-The dashboard listens on `http://localhost:8080` by default. For host-level
-metrics collection and Docker-based agent execution, run the benchmark scripts
-directly on the host so they can access Docker and generic Linux `/proc` CPU/memory collectors.
-
-Host dashboard:
-
-```bash
-AAB_UI_PORT=8080 bin/start_dashboard.sh
-```
-
-## Configuration with `.env`
-
-The sweep runner automatically loads `.env` from the project directory. This avoids
-retyping the Agent, repository, LiteLLM, and CPU/memory settings for every run:
-
-```bash
+cd /home/test/agentic-ai-benchmarking-mini-swe-agent-generic
 cp .env.example .env
 chmod 600 .env
-# Edit .env and set OPENAI_API_KEY locally; never commit the real key.
+# 编辑 .env，设置 OPENAI_API_KEY 和目标仓库
+```
+
+然后直接运行：
+
+```bash
 bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
 ```
 
-To use another file, set `AAB_ENV_FILE=/path/to/run.env`. Explicitly exported shell
-variables take precedence over the file, so one-off overrides remain possible:
+也可以指定其他配置文件：
 
 ```bash
-AAB_ENV_FILE=/path/to/run.env AGENT_SWEEP="1 2 4" PARALLELISM=4 \
+AAB_ENV_FILE=/home/test/configs/click.env \\
   bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
 ```
 
-## Generic CPU and memory metrics
+不要把真实 API key 写入 Git、Dockerfile 或镜像。
 
-This generic copy intentionally does not require Intel PCM, DCGM, or a local GPU.
-It samples CPU utilization/load and host memory from Linux `/proc` files. DRAM
-bandwidth is optional and is not treated as available when no platform backend exists.
+## LiteLLM 配置
 
-## Start vLLM
+本项目保留历史变量名 `VLLM_BASE_URL`，但它可以指向外部 LiteLLM OpenAI 兼容入口：
 
 ```bash
-MODEL=/home/user/models/Qwen2.5-Coder-32B-Instruct \
-TP=8 \
-MAX_MODEL_LEN=4096 \
-MAX_NUM_SEQS=128 \
-MAX_NUM_BATCHED_TOKENS=16384 \
-bin/start_vllm_8x5090.sh
+VLLM_BASE_URL=http://127.0.0.1:4000/v1
+OPENAI_API_KEY=你的LiteLLM密钥
+MODEL=DeepSeek-V4-Flash
 ```
 
-The LiteLLM OpenAI-compatible API defaults to `http://127.0.0.1:4000/v1` with served model name
-`DeepSeek-V4-Flash`.
+Agent 运行时会自动为没有 provider 前缀的模型名补充 `openai/`。
 
-## LiteLLM connection
-
-This Intel server version keeps the historical `VLLM_BASE_URL` variable name for
-compatibility, but it should point to the LiteLLM proxy, not directly to vLLM:
+## 运行本地仓库 Agent sweep
 
 ```bash
 export VLLM_BASE_URL=http://127.0.0.1:4000/v1
-export OPENAI_API_KEY="<your-LiteLLM-key>"
+export OPENAI_API_KEY='新的LiteLLM key'
 export MODEL=DeepSeek-V4-Flash
-```
 
-The key is read only from the process environment. Docker Agent workers inherit it
-via `-e OPENAI_API_KEY` without writing it to the repository.
-
-The adapter adds the `openai/` provider prefix internally when a model is supplied without one, so `MODEL=DeepSeek-V4-Flash` works with the LiteLLM OpenAI-compatible endpoint.
-
-## Run a Mock Sweep
-
-```bash
-python3 -m aab_framework.cli sweep \
-  --workload mini_swe_agent_team_v2 \
-  --agent-counts 1,2,4,8 \
-  --context-lengths 1024,2048,4096 \
-  --parallelism 4 \
-  --adapter-mode mock \
-  --runtime-type process
-```
-
-## Run a Real Repo-Context Sweep
-
-Use a full Django clone as the repo source:
-
-```bash
-git clone https://github.com/django/django.git /home/user/repos/django
-```
-
-Run mini-swe-agent through Docker with per-agent workspaces and metrics:
-
-```bash
-AGENT_SWEEP="1 2 4 8 16 32 64 128" \
-CONTEXT_LENGTH=4096 \
-PARALLELISM=8 \
-ADAPTER_MODE=cli \
-RUNTIME_TYPE=docker \
-MINI_COMMAND=mini \
-MODEL=DeepSeek-V4-Flash \
-VLLM_BASE_URL=http://127.0.0.1:4000/v1 \
-TASK_SOURCE=local \
-TASK="Inspect the Django repository and identify a focused code-quality fix." \
-VERIFY_COMMAND="python -m pytest --collect-only -q" \
-AAB_REPO_CONTEXT_ENABLED=1 \
-AAB_REPO_SOURCE=/home/user/repos/django \
-AAB_REPO_WORKSPACE_MODE=worktree \
-AAB_REPO_CONTEXT_INCLUDE_GIT_HISTORY=1 \
-AAB_REPO_CONTEXT_PYTEST_COLLECT=1 \
+AGENT_SWEEP="1 2 4 8" \\
+PARALLELISM=4 \\
+CONTEXT_LENGTH=4096 \\
+ADAPTER_MODE=cli \\
+RUNTIME_TYPE=docker \\
+TASK_SOURCE=local \\
+AAB_REPO_SOURCE=/home/test/repos/click \\
+AAB_REPO_WORKSPACE_MODE=worktree \\
+TASK="检查Click仓库并完成一个小范围代码改进。" \\
+VERIFY_COMMAND="PYTHONPATH=src python3 -m pytest -q tests/test_compat.py" \\
 bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
 ```
 
-Each child run writes `result.json`; the sweep wrapper combines child results
-into a group `result.json`, `sweep.json`, and `team_sweep_summary.csv`.
+每个测试点会生成：
 
+- `result.json`；
+- Agent trajectory、stdout、stderr；
+- patch、diff 和验证日志；
+- `metrics/cpu.csv`；
+- `metrics/memory.csv`；
+- Docker 运行时日志（如适用）。
 
-The Agent worker image sets `MSWEA_CONFIGURED=1` so unattended Docker workers do not open the mini-SWE-agent first-run setup wizard. API credentials are still supplied only at runtime via `OPENAI_API_KEY`.
+## 通用主机监控工具
 
-## Build the Agent Image
-
-```bash
-docker build -f docker/mini-swe-agent.Dockerfile -t aab-mini-swe-agent:latest .
-```
-
-If you use a custom image, set `RUNTIME_TYPE=docker` and override
-`TeamRunConfig.runtime_image` from Python, or keep the default image tag above.
-
-## Verification
+可用独立脚本包住任意 Agent 或 SWE-bench 命令：
 
 ```bash
-python3 -m unittest discover -s tests
-```
-
-The repository also includes a packaging test that ensures the current codebase
-contains no legacy VM runtime references and has direct deployment entrypoints.
-
-## Generic host monitor
-
-Use `scripts/generic_host_monitor.py` to wrap Agent or SWE-bench commands. It uses
-Linux `/proc` and has no generic Linux CPU/memory collectors, DCGM, or local GPU dependency:
-
-```bash
-python3 scripts/generic_host_monitor.py \
-  --output-dir runs/standalone-smoke/metrics \
-  --interval 1 \
-  --docker-stats \
-  -- \
+python3 scripts/generic_host_monitor.py \\
+  --output-dir runs/standalone-smoke/metrics \\
+  --interval 1 \\
+  --docker-stats \\
+  -- \\
   mini-extra swebench --subset lite --split dev --slice 0:1 --workers 1
 ```
 
-It writes `cpu.csv`, `memory.csv`, optional `docker_stats.tsv`, command logs, and
-`monitor.json`. The sweep wrapper uses the same CPU/memory sampling contract.
+输出包括：
+
+```text
+cpu.csv
+memory.csv
+docker_stats.tsv
+command.stdout
+command.stderr
+monitor.json
+```
+
+## 标准 SWE-bench
+
+标准 SWE-bench 使用官方 `mini-extra swebench`，本仓库提供的通用监控脚本只负责记录主机 CPU/内存和 Docker stats。
+
+```bash
+export OPENAI_API_KEY='新的LiteLLM key'
+export SWE_API_BASE=http://127.0.0.1:4000/v1
+export SWE_MODEL=openai/DeepSeek-V4-Flash
+
+python3 scripts/generic_host_monitor.py \\
+  --output-dir runs/swebench-lite-smoke/metrics \\
+  --interval 1 \\
+  --docker-stats \\
+  -- \\
+  mini-extra swebench \\
+    --subset lite \\
+    --split dev \\
+    --slice 0:1 \\
+    --workers 1 \\
+    --environment-class docker \\
+    --model "$SWE_MODEL" \\
+    --output runs/swebench-lite-smoke/output \\
+    -c swebench.yaml \\
+    -c model.model_kwargs.api_base="$SWE_API_BASE" \\
+    -c model.model_kwargs.drop_params=true \\
+    -c model.cost_tracking=ignore_errors
+```
+
+自定义 Agent 的 `verified_success_rate` 和标准 SWE-bench 的 `resolved_rate` 是不同指标，不能混用。
+
+## 验证
+
+```bash
+python3 -m unittest discover -s tests
+python3 -m compileall -q aab_framework tests scripts
+bash -n bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
+```
+
+## 上游项目
+
+本仓库基于：
+
+```text
+https://github.com/changzhi1990/agentic-ai-benchmarking-mini-swe-agent
+```
+
+当前仓库针对通用 Linux CPU/内存监控进行了适配。
