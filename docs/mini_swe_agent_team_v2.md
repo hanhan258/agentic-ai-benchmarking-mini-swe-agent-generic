@@ -92,7 +92,7 @@ AAB_REPO_CONTEXT_PYTEST_COLLECT=1 \
 bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
 ```
 
-The wrapper starts CPU, GPU, and AMD PCM collectors around each child run,
+The wrapper starts CPU, GPU, and generic CPU/memory collectors around each child run,
 refreshes each child `result.json`, then builds a sweep group result from all
 child runs.
 

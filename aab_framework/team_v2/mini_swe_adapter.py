@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -68,7 +69,7 @@ class MiniSweAgentAdapter:
             "--task",
             plan.prompt,
             "--model",
-            self.config.model,
+            _litellm_model_name(self.config.model),
             "--output",
             command_trajectory,
             "--config",
@@ -96,11 +97,15 @@ class MiniSweAgentAdapter:
                 host_output_dir=output_dir,
                 host_workdir=host_workdir,
                 command=command,
+                env=_llm_runtime_env(),
             )
         cwd = Path(plan.workdir).expanduser() if plan.workdir and self.config.runtime_type != "docker" else None
+        process_env = os.environ.copy()
+        process_env["MSWEA_CONFIGURED"] = "1"
         result = subprocess.run(
             command,
             cwd=cwd,
+            env=process_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -130,6 +135,27 @@ class MiniSweAgentAdapter:
             error=None if status == "completed" else "mini-swe-agent did not complete cleanly",
         )
 
+
+
+
+def _litellm_model_name(model: str) -> str:
+    """Give LiteLLM an explicit provider for OpenAI-compatible gateways."""
+    stripped = model.strip()
+    return stripped if "/" in stripped else f"openai/{stripped}"
+
+
+def _llm_runtime_env() -> dict[str, str | None]:
+    """Pass non-interactive setup and host LLM credentials into Docker.
+
+    A ``None`` value means ``docker run -e KEY``: inherit the value from the
+    host environment without embedding the secret in the generated command.
+    """
+    env: dict[str, str | None] = {"MSWEA_CONFIGURED": "1"}
+    if os.environ.get("OPENAI_API_KEY"):
+        env["OPENAI_API_KEY"] = None
+    if os.environ.get("LITELLM_API_KEY"):
+        env["LITELLM_API_KEY"] = None
+    return env
 
 def _openai_base_url(base_url: str) -> str:
     stripped = base_url.rstrip("/")

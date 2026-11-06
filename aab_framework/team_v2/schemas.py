@@ -29,8 +29,8 @@ class TeamRunConfig:
     max_rounds_per_issue: int = 2
     candidate_per_issue: int = 1
     context_length: int = DEFAULT_CONTEXT_LENGTH
-    vllm_base_url: str = "http://127.0.0.1:8000/v1"
-    model: str = "agentic-model"
+    vllm_base_url: str = "http://127.0.0.1:4000/v1"
+    model: str = "DeepSeek-V4-Flash"
     vllm_max_model_len: int = 4096
     vllm_max_num_seqs: int = 128
     vllm_max_num_batched_tokens: int = 16384

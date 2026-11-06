@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
+
 class MetricsObserver:
     """Lifecycle wrapper around existing metrics outputs.
 
@@ -40,11 +41,12 @@ class MetricsObserver:
         legacy["metrics_timeline"] = timeline
         legacy["metrics_field_mapping"] = {
             "cpu": "cpu.util_pct",
-            "gpu": "gpu.avg_util_pct",
-            "gpu_memory": "gpu.memory_used_mib",
             "memory": "memory.used_mib",
-            "dram_bw": "dram.total_bw_gbps",
+            "gpu": "not_collected",
+            "gpu_memory": "not_collected",
+            "dram_bw": "not_collected",
         }
+        legacy["metrics_support"] = {"cpu": "procfs", "memory": "procfs", "gpu": False, "dram_bw": False}
         legacy["metrics_window"] = window
         return legacy
 
@@ -80,12 +82,8 @@ class MetricsObserver:
     def _read_metrics_csv_summary(self) -> dict[str, Any]:
         metrics_dir = self.run_dir / "metrics"
         cpu = _read_float_col(metrics_dir / "cpu.csv", "cpu_util_pct")
-        memory = _read_float_col(metrics_dir / "memory.csv", "memory_used_mib")
-        gpu = _read_float_col(metrics_dir / "gpu.csv", "utilization_gpu_pct")
-        gpu_memory = _read_float_col(metrics_dir / "gpu.csv", "memory_used_mib")
-        gpu_memctrl = _read_float_col(metrics_dir / "gpu.csv", "utilization_memory_pct")
-        dram_bw = _read_pcm_metric(metrics_dir / "amd_pcm_memory.csv", "Total Mem Bw (GB/s)")
-        if not any([cpu, memory, gpu, gpu_memory, gpu_memctrl, dram_bw]):
+        memory = _read_float_col(metrics_dir / "memory.csv", "mem_used_mib")
+        if not any([cpu, memory]):
             return {}
         return {
             "avg_cpu_util": _avg(cpu),
@@ -96,23 +94,19 @@ class MetricsObserver:
             "max_dram_read_bw": 0,
             "avg_dram_write_bw": 0,
             "max_dram_write_bw": 0,
-            "avg_dram_bw": _avg(dram_bw),
-            "max_dram_bw": _max(dram_bw),
-            "avg_gpu_util": _avg(gpu),
-            "max_gpu_util": _max(gpu),
-            "avg_gpu_memory_used": _avg(gpu_memory),
-            "max_gpu_memory_used": _max(gpu_memory),
-            "avg_gpu_memory_controller_util": _avg(gpu_memctrl),
-            "max_gpu_memory_controller_util": _max(gpu_memctrl),
+            "avg_dram_bw": 0,
+            "max_dram_bw": 0,
+            "avg_gpu_util": 0,
+            "max_gpu_util": 0,
+            "avg_gpu_memory_used": 0,
+            "max_gpu_memory_used": 0,
+            "avg_gpu_memory_controller_util": 0,
+            "max_gpu_memory_controller_util": 0,
             "cpu_p50": _percentile(cpu, 50),
             "cpu_p95": _percentile(cpu, 95),
-            "gpu_p50": _percentile(gpu, 50),
-            "gpu_p95": _percentile(gpu, 95),
-            "gpu_memory_p50": _percentile(gpu_memory, 50),
-            "gpu_memory_p95": _percentile(gpu_memory, 95),
             "memory_p50": _percentile(memory, 50),
             "memory_p95": _percentile(memory, 95),
-            "dram_bw_p95": _percentile(dram_bw, 95),
+            "dram_bw_p95": 0,
         }
 
     def _structured_summary_from_legacy(self, legacy: dict[str, Any]) -> dict[str, Any]:
@@ -167,8 +161,6 @@ class MetricsObserver:
             refs["gpu_memory"] = "metrics/gpu.csv"
         if (metrics_dir / "memory.csv").exists():
             refs["memory"] = "metrics/memory.csv"
-        if (metrics_dir / "amd_pcm_memory.csv").exists():
-            refs["dram_bw"] = "metrics/amd_pcm_memory.csv"
         return refs
 
 
@@ -211,20 +203,6 @@ def _read_float_col(path: Path, column: str) -> list[float]:
                 values.append(float(str(row.get(column, "")).strip()))
             except ValueError:
                 pass
-    return values
-
-
-def _read_pcm_metric(path: Path, metric: str) -> list[float]:
-    if not path.exists():
-        return []
-    values: list[float] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if metric not in line or "|" not in line:
-            continue
-        try:
-            values.append(float(line.split("|")[1].strip()))
-        except (IndexError, ValueError):
-            pass
     return values
 
 

@@ -67,7 +67,7 @@ class DockerRuntime:
         container_name: str,
         source_dir: Path,
         work_dir: Path,
-        env: dict[str, str] | None = None,
+        env: dict[str, str | None] | None = None,
     ) -> list[str]:
         command = [
             "docker",
@@ -89,7 +89,7 @@ class DockerRuntime:
         if self.config.memory_limit:
             command.extend(["--memory", self.config.memory_limit])
         for key, value in sorted((env or {}).items()):
-            command.extend(["-e", f"{key}={value}"])
+            command.extend(["-e", key] if value is None else ["-e", f"{key}={value}"])
         command.extend([self.config.image, "sleep", "infinity"])
         return command
 
@@ -103,7 +103,7 @@ class DockerRuntime:
         host_output_dir: Path,
         command: list[str],
         host_workdir: Path | None = None,
-        env: dict[str, str] | None = None,
+        env: dict[str, str | None] | None = None,
     ) -> list[str]:
         container_cwd = self.config.workdir
         docker_command = [
@@ -126,7 +126,7 @@ class DockerRuntime:
         if self.config.memory_limit:
             docker_command.extend(["--memory", self.config.memory_limit])
         for key, value in sorted((env or {}).items()):
-            docker_command.extend(["-e", f"{key}={value}"])
+            docker_command.extend(["-e", key] if value is None else ["-e", f"{key}={value}"])
         docker_command.append(self.config.image)
         docker_command.extend(command)
         return docker_command

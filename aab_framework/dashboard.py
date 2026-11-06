@@ -27,7 +27,12 @@ MAX_AGENT_COUNT = 512
 STATIC_DIR = Path(__file__).with_name("dashboard_static")
 TEAM_V2_WORKLOAD = "mini_swe_agent_team_v2"
 SUPPORTED_RUNTIMES = ("process", "docker")
-VLLM_MODELS_URL = "http://127.0.0.1:8000/v1/models"
+DEFAULT_LLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://127.0.0.1:4000/v1").rstrip("/")
+VLLM_MODELS_URL = f"{DEFAULT_LLM_BASE_URL}/models"
+
+
+def _configured_llm_api_key() -> str:
+    return os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY", "")
 
 
 @dataclass(frozen=True)
@@ -37,8 +42,8 @@ class SweepLaunchConfig:
     parallelism: int = 4
     adapter_mode: str = "mock"
     runtime_type: str = "process"
-    model: str = "agentic-model"
-    vllm_base_url: str = "http://127.0.0.1:8000/v1"
+    model: str = "DeepSeek-V4-Flash"
+    vllm_base_url: str = DEFAULT_LLM_BASE_URL
     mini_command: str = "mini"
     task_source: str = "synthetic"
     task: str = ""
@@ -86,8 +91,8 @@ def build_sweep_environment(config: SweepLaunchConfig, *, timestamp: str | None 
         "PARALLELISM": str(_positive_int(config.parallelism, "parallelism")),
         "ADAPTER_MODE": _validate_choice(config.adapter_mode, {"mock", "cli"}, "adapter_mode"),
         "RUNTIME_TYPE": _validate_choice(config.runtime_type, set(SUPPORTED_RUNTIMES), "runtime_type"),
-        "MODEL": config.model.strip() or "agentic-model",
-        "VLLM_BASE_URL": config.vllm_base_url.strip() or "http://127.0.0.1:8000/v1",
+        "MODEL": config.model.strip() or "DeepSeek-V4-Flash",
+        "VLLM_BASE_URL": config.vllm_base_url.strip() or DEFAULT_LLM_BASE_URL,
         "MINI_COMMAND": config.mini_command.strip() or "mini",
         "TASK_SOURCE": _validate_choice(config.task_source, {"synthetic", "local"}, "task_source"),
         "TASK": config.task,
@@ -389,8 +394,8 @@ def _make_handler(state: DashboardState) -> type[BaseHTTPRequestHandler]:
                         parallelism=int(payload.get("parallelism", 4)),
                         adapter_mode=str(payload.get("adapter_mode") or "mock"),
                         runtime_type=str(payload.get("runtime_type") or "process"),
-                        model=str(payload.get("model") or "agentic-model"),
-                        vllm_base_url=str(payload.get("vllm_base_url") or "http://127.0.0.1:8000/v1"),
+                        model=str(payload.get("model") or "DeepSeek-V4-Flash"),
+                        vllm_base_url=str(payload.get("vllm_base_url") or DEFAULT_LLM_BASE_URL),
                         mini_command=str(payload.get("mini_command") or "mini"),
                         task_source=str(payload.get("task_source") or "synthetic"),
                         task=str(payload.get("task") or ""),
@@ -487,16 +492,18 @@ def _query_int(query: dict[str, list[str]], key: str, default: int) -> int:
 
 def _probe_vllm() -> dict[str, Any]:
     try:
+        command = [
+            "curl",
+            "-fsS",
+            "--max-time",
+            "2",
+            VLLM_MODELS_URL,
+        ]
+        api_key = _configured_llm_api_key()
+        if api_key:
+            command.extend(["-H", f"Authorization: Bearer {api_key}"])
         result = subprocess.run(
-            [
-                "curl",
-                "-fsS",
-                "--max-time",
-                "2",
-                VLLM_MODELS_URL,
-                "-H",
-                "Authorization: Bearer token-abc123",
-            ],
+            command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -901,8 +908,7 @@ def _dram_peak_pct(value: object, dram_bw_max_gbps: int | float) -> int | float:
         return _number(value)
     if not dram_bw_max_gbps:
         return 0
-    pct = round(float(dram_bw_max_gbps) / 580.0 * 100, 2)
-    return int(pct) if pct.is_integer() else pct
+    return 0
 
 
 def _looks_like_run(path: Path) -> bool:

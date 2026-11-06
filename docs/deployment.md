@@ -21,7 +21,7 @@ the host are visible in the dashboard.
 ## Host Dashboard
 
 Use host mode when the dashboard should launch sweeps or when scripts need
-access to local `docker`, `dcgmi`, and AMD PCM tooling:
+access to local `docker` and generic Linux CPU/memory tooling:
 
 ```bash
 python3 -m pip install -e .
@@ -35,6 +35,12 @@ docker build -f docker/mini-swe-agent.Dockerfile -t aab-mini-swe-agent:latest .
 ```
 
 The team runner defaults to that image when `RUNTIME_TYPE=docker`.
+
+## Generic CPU and memory collector
+
+The generic copy samples CPU and host memory through Linux `/proc` files. It does not
+require generic Linux CPU/memory collectors, DCGM, or a local GPU. A future Vera/ARM DRAM bandwidth backend can
+be added separately without changing the CPU/memory CSV contract.
 
 ## Start vLLM
 
@@ -50,7 +56,7 @@ bin/start_vllm_8x5090.sh
 Verify:
 
 ```bash
-curl -fsS http://127.0.0.1:8000/v1/models -H "Authorization: Bearer token-abc123"
+curl -fsS http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $OPENAI_API_KEY"
 ```
 
 ## Run a Django Sweep
@@ -65,8 +71,8 @@ CONTEXT_LENGTH=4096 \
 PARALLELISM=8 \
 ADAPTER_MODE=cli \
 RUNTIME_TYPE=docker \
-MODEL=agentic-model \
-VLLM_BASE_URL=http://127.0.0.1:8000/v1 \
+MODEL=DeepSeek-V4-Flash \
+VLLM_BASE_URL=http://127.0.0.1:4000/v1 \
 TASK_SOURCE=local \
 TASK="Inspect the Django repository and make a focused improvement." \
 VERIFY_COMMAND="python -m pytest --collect-only -q" \

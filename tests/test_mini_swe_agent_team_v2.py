@@ -47,6 +47,15 @@ class MiniSweAgentTeamV2Tests(unittest.TestCase):
             self.assertEqual(workers[0].effective_context_length, context_length)
             self.assertEqual(plans[0].max_rounds, config.max_rounds_per_issue)
 
+    def test_mini_cli_runtime_environment_disables_first_run_setup(self) -> None:
+        from aab_framework.team_v2.mini_swe_adapter import _llm_runtime_env
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False):
+            env = _llm_runtime_env()
+
+        self.assertEqual(env["MSWEA_CONFIGURED"], "1")
+        self.assertIsNone(env["OPENAI_API_KEY"])
+
     def test_docker_runtime_default_config_and_command_encapsulation(self) -> None:
         config = TeamRunConfig()
         runtime = DockerRuntime(config)
@@ -615,10 +624,16 @@ class MiniSweAgentTeamV2Tests(unittest.TestCase):
                 "2,0,80,60,1500,2000,120,42\n",
                 encoding="utf-8",
             )
-            (metrics_dir / "amd_pcm_memory.csv").write_text(
-                "Total Mem Bw (GB/s)|50.0\n"
-                "Total Mem Bw (GB/s)|70.0\n",
+            (metrics_dir / "memory.csv").write_text(
+
+                "timestamp,mem_total_mib,mem_used_mib,mem_available_mib,buffers_mib,cached_mib,swap_total_mib,swap_used_mib,load1,load5,load15\n"
+
+                "1,1024,500,524,20,200,0,0,1,1,1\n"
+
+                "2,1024,600,424,20,200,0,0,2,2,2\n",
+
                 encoding="utf-8",
+
             )
             (run_dir / "result.json").write_text(
                 json.dumps(
@@ -642,9 +657,9 @@ class MiniSweAgentTeamV2Tests(unittest.TestCase):
             refreshed = refresh_run_metrics(run_dir)
 
         self.assertEqual(refreshed["metrics_summary"]["cpu"]["avg"], 20.0)
-        self.assertEqual(refreshed["metrics_summary"]["gpu"]["p95"], 77.0)
-        self.assertEqual(refreshed["metrics_summary"]["gpu_memory"]["max"], 1500.0)
-        self.assertEqual(refreshed["metrics_summary"]["dram_bw"]["avg"], 60.0)
+        self.assertEqual(refreshed["metrics_summary"]["gpu"]["p95"], 0)
+        self.assertEqual(refreshed["metrics_summary"]["gpu_memory"]["max"], 0)
+        self.assertEqual(refreshed["metrics_summary"]["dram_bw"]["avg"], 0.0)
         self.assertEqual(refreshed["metrics_timeline"]["cpu"], "metrics/cpu.csv")
         self.assertEqual(refreshed["metrics_timeline"]["gpu"], "metrics/gpu.csv")
 

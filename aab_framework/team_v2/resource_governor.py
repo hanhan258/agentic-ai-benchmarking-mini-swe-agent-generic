@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -14,8 +15,12 @@ class ResourceGovernor:
 
     def vllm_healthy(self, base_url: str) -> bool:
         url = base_url.rstrip("/") + "/models"
+        command = ["curl", "-fsS", "--max-time", "2", url]
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY", "")
+        if api_key:
+            command.extend(["-H", f"Authorization: Bearer {api_key}"])
         result = subprocess.run(
-            ["curl", "-fsS", "--max-time", "2", url],
+            command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,

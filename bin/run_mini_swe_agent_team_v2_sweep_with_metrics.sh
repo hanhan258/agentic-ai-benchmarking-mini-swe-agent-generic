@@ -1,6 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load a dotenv-style configuration file when present. Explicit environment
+# variables always win over values from the file. Use AAB_ENV_FILE to choose a
+# different file; the default is .env in the current project directory.
+AAB_ENV_FILE="${AAB_ENV_FILE:-${ENV_FILE:-.env}}"
+if [[ "${AAB_ENV_FILE}" != /* ]]; then
+  AAB_ENV_FILE="${PWD}/${AAB_ENV_FILE}"
+fi
+load_dotenv_defaults() {
+  local file="$1" raw key value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    raw="${raw#${raw%%[![:space:]]*}}"
+    raw="${raw%${raw##*[![:space:]]}}"
+    [[ -z "$raw" || "${raw:0:1}" == "#" ]] && continue
+    [[ "$raw" == export\ * ]] && raw="${raw#export }"
+    [[ "$raw" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    [[ -v "$key" ]] && continue
+    value="${BASH_REMATCH[2]}"
+    if [[ ${#value} -ge 2 && "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$file"
+}
+load_dotenv_defaults "$AAB_ENV_FILE"
+
 AGENT_SWEEP="${AGENT_SWEEP:-1 2 4}"
 SWEEP_ROOT="${SWEEP_ROOT:-runs/team-v2-sweep-metrics-$(date +%Y%m%d-%H%M%S)}"
 PARALLELISM="${PARALLELISM:-4}"
@@ -28,13 +58,10 @@ TASK="${TASK:-}"
 VERIFY_COMMAND="${VERIFY_COMMAND:-}"
 VERIFY_TIMEOUT_SEC="${VERIFY_TIMEOUT_SEC:-120}"
 MINI_COMMAND="${MINI_COMMAND:-mini}"
-MODEL="${MODEL:-openai/agentic-model}"
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}"
-PCM_BIN="${PCM_BIN:-/home/user/zhi/AMDuProf_Nda_Linux_x64_5.0.1479/bin/AMDuProfPcm}"
-AAB_DCGMI_BIN="${AAB_DCGMI_BIN:-dcgmi}"
-AAB_DCGM_INTERVAL_MS="${AAB_DCGM_INTERVAL_MS:-1000}"
-AAB_DCGM_FIELD_IDS="${AAB_DCGM_FIELD_IDS:-203,204,252,250,155,150,1002,1003,1004,1005,1007,1008}"
-SUDO_PASSWORD="${SUDO_PASSWORD:-}"
+MODEL="${MODEL:-DeepSeek-V4-Flash}"
+VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:4000/v1}"
+MEMORY_SAMPLE_INTERVAL_SEC="${MEMORY_SAMPLE_INTERVAL_SEC:-1}"
+GENERIC_MEMORY_BACKEND="${GENERIC_MEMORY_BACKEND:-procfs}"
 
 mkdir -p "${SWEEP_ROOT}"
 
@@ -136,54 +163,43 @@ stop_cpu_metrics() {
   fi
 }
 
-start_gpu_metrics() {
+start_memory_metrics() {
   local run_dir="$1"
   mkdir -p "${run_dir}/metrics"
-  if ! command -v "${AAB_DCGMI_BIN}" >/dev/null 2>&1; then
-    echo "dcgmi unavailable; GPU metrics disabled" > "${run_dir}/metrics/gpu_metrics_backend.log"
-    echo "timestamp,index,utilization_gpu_pct,utilization_memory_pct,memory_used_mib,memory_total_mib,power_draw_w,temperature_c,memory_used_pct,gr_engine_active_pct,sm_active_pct,sm_occupancy_pct,tensor_active_pct,dram_active_pct,fp32_active_pct,fp16_active_pct,gpu_metrics_backend,dcgm_metrics_backend" > "${run_dir}/metrics/gpu.csv"
-    return 0
-  fi
-  echo "dcgmi" > "${run_dir}/metrics/gpu_metrics_backend.log"
   (
-    echo "timestamp,index,utilization_gpu_pct,utilization_memory_pct,memory_used_mib,memory_total_mib,power_draw_w,temperature_c,memory_used_pct,gr_engine_active_pct,sm_active_pct,sm_occupancy_pct,tensor_active_pct,dram_active_pct,fp32_active_pct,fp16_active_pct,gpu_metrics_backend,dcgm_metrics_backend"
-    "${AAB_DCGMI_BIN}" dmon -e "${AAB_DCGM_FIELD_IDS}" -d "${AAB_DCGM_INTERVAL_MS}" 2>>"${run_dir}/metrics/dcgm.stderr" \
-      | while IFS= read -r line; do
-          ts="$(date +%s)"
-          printf '%s\n' "${line}" | python3 -m aab_framework.dcgm --field-ids "${AAB_DCGM_FIELD_IDS}" --timestamp "${ts}" | tail -n +2 || true
-        done
-  ) > "${run_dir}/metrics/gpu.csv" &
-  GPU_METRICS_PID="$!"
+    echo "timestamp,mem_total_mib,mem_used_mib,mem_available_mib,buffers_mib,cached_mib,swap_total_mib,swap_used_mib,load1,load5,load15"
+    while true; do
+      read -r load1 load5 load15 _ < /proc/loadavg
+      awk -v l1="$load1" -v l5="$load5" -v l15="$load15" '
+        /^MemTotal:/ { total=$2 }
+        /^MemFree:/ { free=$2 }
+        /^MemAvailable:/ { available=$2 }
+        /^Buffers:/ { buffers=$2 }
+        /^Cached:/ { cached=$2 }
+        /^SReclaimable:/ { reclaim=$2 }
+        /^Shmem:/ { shmem=$2 }
+        /^SwapTotal:/ { swap_total=$2 }
+        /^SwapFree:/ { swap_free=$2 }
+        END {
+          used=total-available
+          cached_total=cached+reclaim-shmem
+          if (cached_total < 0) cached_total=0
+          printf "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%s,%s\n",
+            systime(), total/1024, used/1024, available/1024,
+            buffers/1024, cached_total/1024, swap_total/1024,
+            (swap_total-swap_free)/1024, l1, l5, l15
+        }
+      ' /proc/meminfo
+      sleep "${MEMORY_SAMPLE_INTERVAL_SEC}"
+    done
+  ) > "${run_dir}/metrics/memory.csv" &
+  MEMORY_METRICS_PID="$!"
 }
 
-stop_gpu_metrics() {
-  if [[ -n "${GPU_METRICS_PID:-}" ]]; then
-    pkill -TERM -P "${GPU_METRICS_PID}" >/dev/null 2>&1 || true
-    kill "${GPU_METRICS_PID}" >/dev/null 2>&1 || true
-    wait "${GPU_METRICS_PID}" >/dev/null 2>&1 || true
-  fi
-}
-
-start_pcm() {
-  local run_dir="$1"
-  mkdir -p "${run_dir}/metrics"
-  PCM_PID=""
-  if [[ -x "${PCM_BIN}" && -n "${SUDO_PASSWORD}" ]]; then
-    (
-      printf '%s\n' "${SUDO_PASSWORD}" | sudo -S -p '' "${PCM_BIN}" top \
-        -m memory -a -A system --msr -d 3600 -I 1200 \
-        -o "${run_dir}/metrics/amd_pcm_memory.csv"
-    ) > "${run_dir}/metrics/amd_pcm.stdout" 2> "${run_dir}/metrics/amd_pcm.stderr" &
-    PCM_PID="$!"
-    sleep 2
-  fi
-}
-
-stop_pcm() {
-  if [[ -n "${PCM_PID:-}" ]]; then
-    printf '%s\n' "${SUDO_PASSWORD}" | sudo -S -p '' pkill -INT -f "${PCM_BIN}" >/dev/null 2>&1 || true
-    sleep 1
-    wait "${PCM_PID}" >/dev/null 2>&1 || true
+stop_memory_metrics() {
+  if [[ -n "${MEMORY_METRICS_PID:-}" ]]; then
+    kill "${MEMORY_METRICS_PID}" >/dev/null 2>&1 || true
+    wait "${MEMORY_METRICS_PID}" >/dev/null 2>&1 || true
   fi
 }
 
@@ -204,8 +220,7 @@ for agents in ${AGENT_SWEEP//,/ }; do
   mkdir -p "${point_tmp}"
   echo "===== START mini_swe_agent_team_v2 agents=${agents} ====="
   start_cpu_metrics "${point_tmp}"
-  start_gpu_metrics "${point_tmp}"
-  start_pcm "${point_tmp}"
+  start_memory_metrics "${point_tmp}"
   set +e
   run_output="$(
     python3 -m aab_framework.cli run \
@@ -225,9 +240,8 @@ for agents in ${AGENT_SWEEP//,/ }; do
   rc="$?"
   set -e
   sleep "${METRICS_MIN_SECONDS}"
-  stop_pcm
+  stop_memory_metrics
   stop_cpu_metrics
-  stop_gpu_metrics
   printf '%s\n' "${run_output}" | tee "${point_tmp}/run.log"
   if [[ "${rc}" -ne 0 ]]; then
     echo "run failed for agents=${agents} rc=${rc}" >&2

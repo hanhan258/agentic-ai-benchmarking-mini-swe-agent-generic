@@ -43,13 +43,39 @@ docker compose up --build dashboard
 
 The dashboard listens on `http://localhost:8080` by default. For host-level
 metrics collection and Docker-based agent execution, run the benchmark scripts
-directly on the host so they can access `docker`, `dcgmi`, and the AMD PCM tool.
+directly on the host so they can access Docker and generic Linux `/proc` CPU/memory collectors.
 
 Host dashboard:
 
 ```bash
 AAB_UI_PORT=8080 bin/start_dashboard.sh
 ```
+
+## Configuration with `.env`
+
+The sweep runner automatically loads `.env` from the project directory. This avoids
+retyping the Agent, repository, LiteLLM, and CPU/memory settings for every run:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Edit .env and set OPENAI_API_KEY locally; never commit the real key.
+bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
+```
+
+To use another file, set `AAB_ENV_FILE=/path/to/run.env`. Explicitly exported shell
+variables take precedence over the file, so one-off overrides remain possible:
+
+```bash
+AAB_ENV_FILE=/path/to/run.env AGENT_SWEEP="1 2 4" PARALLELISM=4 \
+  bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
+```
+
+## Generic CPU and memory metrics
+
+This generic copy intentionally does not require Intel PCM, DCGM, or a local GPU.
+It samples CPU utilization/load and host memory from Linux `/proc` files. DRAM
+bandwidth is optional and is not treated as available when no platform backend exists.
 
 ## Start vLLM
 
@@ -62,8 +88,24 @@ MAX_NUM_BATCHED_TOKENS=16384 \
 bin/start_vllm_8x5090.sh
 ```
 
-The vLLM API defaults to `http://127.0.0.1:8000/v1` with served model name
-`agentic-model`.
+The LiteLLM OpenAI-compatible API defaults to `http://127.0.0.1:4000/v1` with served model name
+`DeepSeek-V4-Flash`.
+
+## LiteLLM connection
+
+This Intel server version keeps the historical `VLLM_BASE_URL` variable name for
+compatibility, but it should point to the LiteLLM proxy, not directly to vLLM:
+
+```bash
+export VLLM_BASE_URL=http://127.0.0.1:4000/v1
+export OPENAI_API_KEY="<your-LiteLLM-key>"
+export MODEL=DeepSeek-V4-Flash
+```
+
+The key is read only from the process environment. Docker Agent workers inherit it
+via `-e OPENAI_API_KEY` without writing it to the repository.
+
+The adapter adds the `openai/` provider prefix internally when a model is supplied without one, so `MODEL=DeepSeek-V4-Flash` works with the LiteLLM OpenAI-compatible endpoint.
 
 ## Run a Mock Sweep
 
@@ -94,8 +136,8 @@ PARALLELISM=8 \
 ADAPTER_MODE=cli \
 RUNTIME_TYPE=docker \
 MINI_COMMAND=mini \
-MODEL=agentic-model \
-VLLM_BASE_URL=http://127.0.0.1:8000/v1 \
+MODEL=DeepSeek-V4-Flash \
+VLLM_BASE_URL=http://127.0.0.1:4000/v1 \
 TASK_SOURCE=local \
 TASK="Inspect the Django repository and identify a focused code-quality fix." \
 VERIFY_COMMAND="python -m pytest --collect-only -q" \
@@ -109,6 +151,9 @@ bin/run_mini_swe_agent_team_v2_sweep_with_metrics.sh
 
 Each child run writes `result.json`; the sweep wrapper combines child results
 into a group `result.json`, `sweep.json`, and `team_sweep_summary.csv`.
+
+
+The Agent worker image sets `MSWEA_CONFIGURED=1` so unattended Docker workers do not open the mini-SWE-agent first-run setup wizard. API credentials are still supplied only at runtime via `OPENAI_API_KEY`.
 
 ## Build the Agent Image
 
@@ -127,3 +172,20 @@ python3 -m unittest discover -s tests
 
 The repository also includes a packaging test that ensures the current codebase
 contains no legacy VM runtime references and has direct deployment entrypoints.
+
+## Generic host monitor
+
+Use `scripts/generic_host_monitor.py` to wrap Agent or SWE-bench commands. It uses
+Linux `/proc` and has no generic Linux CPU/memory collectors, DCGM, or local GPU dependency:
+
+```bash
+python3 scripts/generic_host_monitor.py \
+  --output-dir runs/standalone-smoke/metrics \
+  --interval 1 \
+  --docker-stats \
+  -- \
+  mini-extra swebench --subset lite --split dev --slice 0:1 --workers 1
+```
+
+It writes `cpu.csv`, `memory.csv`, optional `docker_stats.tsv`, command logs, and
+`monitor.json`. The sweep wrapper uses the same CPU/memory sampling contract.

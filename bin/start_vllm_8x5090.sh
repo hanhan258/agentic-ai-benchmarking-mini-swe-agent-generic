@@ -3,7 +3,7 @@ set -euo pipefail
 
 MODEL="${MODEL:-/home/user/models/Qwen2.5-Coder-32B-Instruct}"
 IMAGE="${IMAGE:-vllm/vllm-openai:latest}"
-SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-agentic-model}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-DeepSeek-V4-Flash}"
 API_KEY="${API_KEY:-token-abc123}"
 PORT="${PORT:-8000}"
 TP="${TP:-8}"

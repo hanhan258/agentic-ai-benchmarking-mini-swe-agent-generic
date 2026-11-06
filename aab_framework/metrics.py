@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
-DRAM_PEAK_BW_GBPS = 580.0
+
+# Xeon Gold 6530: 2 sockets * 8 DDR5 channels * 4800 MT/s * 8 bytes.
+DRAM_PEAK_BW_GBPS = None
 
 
 ALIGNED_FIELDS = [
@@ -28,6 +30,11 @@ ALIGNED_FIELDS = [
     "cpu_user_p95_pct",
     "cpu_sys_p95_pct",
     "load1_p95",
+    "memory_used_p50_mib",
+    "memory_used_p95_mib",
+    "memory_used_max_mib",
+    "memory_available_p05_mib",
+    "memory_samples",
     "dram_bw_p50_gbps",
     "dram_bw_p95_gbps",
     "dram_bw_max_gbps",
@@ -112,22 +119,23 @@ def _summarize_point(path: Path, run_seconds: float, workload_seconds: float) ->
     user = _read_float_col(path / "metrics" / "cpu.csv", "user_pct")
     system = _read_float_col(path / "metrics" / "cpu.csv", "system_pct")
     load1 = _read_float_col(path / "metrics" / "cpu.csv", "load1")
-    gpu = _read_float_col(path / "metrics" / "gpu.csv", "utilization_gpu_pct")
-    gpu_memctrl = _read_float_col(path / "metrics" / "gpu.csv", "utilization_memory_pct")
-    gpu_power = _read_float_col(path / "metrics" / "gpu.csv", "power_draw_w")
-    gpu_mem_used = _read_float_col(path / "metrics" / "gpu.csv", "memory_used_mib")
-    gpu_mem_used_pct = _read_gpu_memory_used_pct(path / "metrics" / "gpu.csv")
-    dcgm_source = _dcgm_metrics_path(path)
-    gr_engine_active = _read_float_col(dcgm_source, "gr_engine_active_pct")
-    sm_active = _read_float_col(dcgm_source, "sm_active_pct")
-    sm_occupancy = _read_float_col(dcgm_source, "sm_occupancy_pct")
-    tensor_active = _read_float_col(dcgm_source, "tensor_active_pct")
-    dram_active = _read_float_col(dcgm_source, "dram_active_pct")
-    fp32_active = _read_float_col(dcgm_source, "fp32_active_pct")
-    fp16_active = _read_float_col(dcgm_source, "fp16_active_pct")
-    dram_bw = _read_pcm_metric(path / "metrics" / "amd_pcm_memory.csv", "Total Mem Bw (GB/s)")
-    dram_rd = _read_pcm_metric(path / "metrics" / "amd_pcm_memory.csv", "Total Mem RdBw (GB/s)")
-    dram_wr = _read_pcm_metric(path / "metrics" / "amd_pcm_memory.csv", "Total Mem WrBw (GB/s)")
+    gpu: list[float] = []
+    gpu_memctrl: list[float] = []
+    gpu_power: list[float] = []
+    gpu_mem_used: list[float] = []
+    gpu_mem_used_pct: list[float] = []
+    gr_engine_active: list[float] = []
+    sm_active: list[float] = []
+    sm_occupancy: list[float] = []
+    tensor_active: list[float] = []
+    dram_active: list[float] = []
+    fp32_active: list[float] = []
+    fp16_active: list[float] = []
+    memory_used = _read_float_col(path / "metrics" / "memory.csv", "mem_used_mib")
+    memory_available = _read_float_col(path / "metrics" / "memory.csv", "mem_available_mib")
+    dram_bw: list[float] = []
+    dram_rd: list[float] = []
+    dram_wr: list[float] = []
     result_records = _read_result_records(path / "results")
     completed = int(summary.get("completed_tasks", 0))
     failed = int(summary.get("failed_tasks", 0))
@@ -156,9 +164,12 @@ def _summarize_point(path: Path, run_seconds: float, workload_seconds: float) ->
         "dram_bw_p50_gbps": _round(_percentile(dram_bw, 50)),
         "dram_bw_p95_gbps": _round(_percentile(dram_bw, 95)),
         "dram_bw_max_gbps": _round(dram_bw_max),
-        "dram_bw_max_pct_of_peak": _round(
-            100 * dram_bw_max / DRAM_PEAK_BW_GBPS if dram_bw_max is not None else None
-        ),
+        "dram_bw_max_pct_of_peak": "",
+        "memory_used_p50_mib": _round(_percentile(memory_used, 50)),
+        "memory_used_p95_mib": _round(_percentile(memory_used, 95)),
+        "memory_used_max_mib": _round(max(memory_used) if memory_used else None),
+        "memory_available_p05_mib": _round(_percentile(memory_available, 5)),
+        "memory_samples": len(memory_used),
         "dram_read_bw_p95_gbps": _round(_percentile(dram_rd, 95)),
         "dram_write_bw_p95_gbps": _round(_percentile(dram_wr, 95)),
         "gpu_util_p50_pct": _round(_percentile(gpu, 50)),
@@ -199,9 +210,9 @@ def _summarize_point(path: Path, run_seconds: float, workload_seconds: float) ->
         "memory_workers": _unique_join(item.get("memory_workers") for item in result_records),
         "memory_mode": _unique_join(item.get("memory_mode") for item in result_records),
         "cpu_samples": len(cpu),
-        "pcm_samples": len(dram_bw),
-        "gpu_samples": len(gpu),
-        "dcgm_samples": len(sm_active or tensor_active or dram_active or gr_engine_active),
+        "pcm_samples": 0,
+        "gpu_samples": 0,
+        "dcgm_samples": 0,
     }
 
 
@@ -254,20 +265,6 @@ def _read_gpu_memory_used_pct(path: Path) -> list[float]:
                 continue
             if total > 0:
                 values.append(100 * used / total)
-    return values
-
-
-def _read_pcm_metric(path: Path, metric: str) -> list[float]:
-    values: list[float] = []
-    if not path.exists():
-        return values
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if metric not in line or "|" not in line:
-            continue
-        try:
-            values.append(float(line.split("|")[1].strip()))
-        except (IndexError, ValueError):
-            pass
     return values
 
 

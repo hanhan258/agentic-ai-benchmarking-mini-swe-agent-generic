@@ -245,10 +245,16 @@ class CoreComponentTests(unittest.TestCase):
                 "2,0,50,20,200,1000,100,35\n",
                 encoding="utf-8",
             )
-            (metrics / "amd_pcm_memory.csv").write_text(
-                "Total Mem Bw (GB/s)    |            10.00 |            5.00 |            5.00 |\n"
-                "Total Mem Bw (GB/s)    |            20.00 |           10.00 |           10.00 |\n",
+            (metrics / "memory.csv").write_text(
+
+                "timestamp,mem_total_mib,mem_used_mib,mem_available_mib,buffers_mib,cached_mib,swap_total_mib,swap_used_mib,load1,load5,load15\n"
+
+                "1,1024,500,524,20,200,0,0,1,1,1\n"
+
+                "2,1024,600,424,20,200,0,0,2,2,2\n",
+
                 encoding="utf-8",
+
             )
 
             rows = summarize_agent_sweep(root, run_seconds=60, workload_seconds=30)
@@ -256,8 +262,8 @@ class CoreComponentTests(unittest.TestCase):
 
             self.assertEqual(rows[0]["agents"], 2)
             self.assertEqual(rows[0]["completed"], 2)
-            self.assertEqual(rows[0]["dram_bw_p95_gbps"], 19.5)
-            self.assertEqual(rows[0]["gpu_util_p95_pct"], 50.0)
+            self.assertEqual(rows[0]["dram_bw_p95_gbps"], "")
+            self.assertEqual(rows[0]["gpu_util_p95_pct"], "")
             self.assertTrue(aligned_exists)
 
 

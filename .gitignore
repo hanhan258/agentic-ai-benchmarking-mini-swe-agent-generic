@@ -11,3 +11,9 @@ remote_results/
 *.outer.log
 dashboard*.log
 dashboard*.pid
+.env
+.env.*
+!.env.example
+*.tar
+*.tar.gz
+*.bak

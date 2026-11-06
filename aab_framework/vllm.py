@@ -8,7 +8,7 @@ from shlex import quote
 class VllmDockerConfig:
     model: str
     image: str = "vllm/vllm-openai:latest"
-    served_model_name: str = "agentic-model"
+    served_model_name: str = "DeepSeek-V4-Flash"
     api_key: str = "token-abc123"
     tensor_parallel_size: int = 8
     port: int = 8000
